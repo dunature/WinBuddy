@@ -158,6 +158,10 @@ export interface AppSettings {
   promptOptimizationModel?: PromptOptimizationModelSelection
   /** 主窗口状态（大小、位置、是否最大化） */
   mainWindowState?: MainWindowState
+  /** 内部 Skill Marketplace 功能开关，Release Gate 前默认关闭 */
+  marketplaceEnabled?: boolean
+  /** Skill Marketplace API 地址，存储在 settings.json 而非渲染进程缓存 */
+  marketplaceApiUrl?: string
 }
 
 /** 主窗口大小、位置和最大化状态 */

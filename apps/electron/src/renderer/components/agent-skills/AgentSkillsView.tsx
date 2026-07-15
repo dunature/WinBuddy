@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/popover'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { agentPendingPromptAtom, workspaceCapabilitiesVersionAtom } from '@/atoms/agent-atoms'
-import { agentSkillsTabAtom } from '@/atoms/active-view'
+import { agentSkillsSurfaceAtom, agentSkillsTabAtom } from '@/atoms/active-view'
 import { settingsOpenAtom, settingsTabAtom, toolSettingsFocusAtom, type ToolSettingsFocus } from '@/atoms/settings-tab'
 import { useProjectActions } from '@/hooks/useProjectActions'
 import { useCreateSession } from '@/hooks/useCreateSession'
@@ -36,6 +36,7 @@ import { BuiltinMcpDetailSheet } from './BuiltinMcpDetailSheet'
 import { ImportSkillDialog } from './ImportSkillDialog'
 import { WorkspaceMemoryTab } from './WorkspaceMemoryTab'
 import { groupSkills } from './skillGrouping'
+import { MarketplaceBrowser } from './MarketplaceBrowser'
 
 function buildSkillClassificationPrompt(input: {
   workspaceName: string
@@ -96,7 +97,9 @@ export function AgentSkillsView(): React.ReactElement {
   const { createAgent } = useCreateSession()
 
   const [tab, setTab] = useAtom(agentSkillsTabAtom)
+  const [surface, setSurface] = useAtom(agentSkillsSurfaceAtom)
   const [search, setSearch] = React.useState('')
+  const [marketplaceConfig, setMarketplaceConfig] = React.useState<{ enabled: boolean; apiUrl?: string }>({ enabled: false })
   const [selectedSkillSlug, setSelectedSkillSlug] = React.useState<string | null>(null)
   const [mcpSheetOpen, setMcpSheetOpen] = React.useState(false)
   const [editingMcp, setEditingMcp] = React.useState<{ name: string; entry: McpServerEntry } | null>(null)
@@ -108,6 +111,14 @@ export function AgentSkillsView(): React.ReactElement {
   const [isDeletingSkill, setIsDeletingSkill] = React.useState(false)
   const [isDeletingMcp, setIsDeletingMcp] = React.useState(false)
   const [classifyingSkills, setClassifyingSkills] = React.useState(false)
+
+  React.useEffect(() => {
+    let active = true
+    window.electronAPI.getSettings().then((settings) => {
+      if (active) setMarketplaceConfig({ enabled: settings.marketplaceEnabled === true, apiUrl: settings.marketplaceApiUrl })
+    }).catch((error: unknown) => console.error('[社区市场] 读取内部配置失败:', error))
+    return () => { active = false }
+  }, [])
 
   const q = search.trim().toLowerCase()
 
@@ -212,6 +223,10 @@ export function AgentSkillsView(): React.ReactElement {
     )
   }
 
+  if (surface === 'marketplace' && marketplaceConfig.enabled) {
+    return <MarketplaceBrowser apiUrl={marketplaceConfig.apiUrl} onBack={() => setSurface('library')} />
+  }
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* 标题栏 + 工作区切换 */}
@@ -304,20 +319,21 @@ export function AgentSkillsView(): React.ReactElement {
           />
         </div>
 
-        {/* 社区市场（占位） */}
+        {/* 社区市场在 Release Gate 前仅由 settings.json 内部开关启用 */}
         {tab === 'skills' && (
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                disabled
-                className="flex h-8 cursor-not-allowed items-center gap-1.5 rounded-lg border border-dashed border-border/60 px-3 text-[13px] font-medium text-foreground/35"
+                disabled={!marketplaceConfig.enabled}
+                onClick={() => setSurface('marketplace')}
+                className="flex h-8 items-center gap-1.5 rounded-lg border border-border/60 bg-content-area px-3 text-[13px] font-medium text-foreground/80 shadow-sm transition-colors hover:bg-foreground/[0.04] disabled:cursor-not-allowed disabled:border-dashed disabled:bg-transparent disabled:text-foreground/35 disabled:shadow-none"
               >
                 <Store size={14} />
                 <span>社区市场</span>
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">即将上线：一键浏览、安装与更新社区 Skills</TooltipContent>
+            <TooltipContent side="bottom">{marketplaceConfig.enabled ? '浏览经过审核的社区 Skills' : '内部功能：通过 Release Gate 后开放'}</TooltipContent>
           </Tooltip>
         )}
 
