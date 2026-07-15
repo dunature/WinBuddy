@@ -1,0 +1,18 @@
+{
+  "id": "ws_33161563",
+  "name": "WinBuddy",
+  "slug": "winbuddy",
+  "defaults": {
+    "permissionMode": "safe",
+    "cyclablePermissionModes": [
+      "safe",
+      "allow-all"
+    ],
+    "enabledSourceSlugs": []
+  },
+  "localMcpServers": {
+    "enabled": true
+  },
+  "createdAt": 1784033479293,
+  "updatedAt": 1784033479294
+}
