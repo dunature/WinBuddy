@@ -13,7 +13,7 @@
 | ORM | `drizzle-orm@0.45.2`、`drizzle-kit@0.31.10` | Apache-2.0 / MIT | 类型化 schema 与 migration | SQL migration + `postgres` |
 | PostgreSQL | `postgres@3.4.9` | Unlicense | Node >=12；轻量、支持 Bun | `pg` |
 | YAML | `yaml@2.9.0` | ISC | Node >=14.6；支持 block scalar 与节点范围 | `js-yaml` |
-| SemVer | `semver@7.8.5` | ISC | Node >=10；完整 prerelease/build 规则 | 内部小型 parser，不推荐 |
+| SemVer | `semver@7.8.5`、`@types/semver@7.7.1` | ISC / MIT | Node >=10；完整 prerelease/build 规则 | 内部小型 parser，不推荐 |
 | ZIP | `yauzl@3.4.0`、`@types/yauzl@3.4.0` | MIT | lazy central-directory 读取，便于先检查后解压 | `unzipper` |
 | 对象存储 | `@aws-sdk/client-s3@3.1087.0`、`@aws-sdk/s3-request-presigner@3.1087.0` | Apache-2.0 | Node >=20；兼容 S3/OSS endpoint | 阿里云 OSS SDK |
 | Web 路由 | `react-router-dom@7.18.1` | MIT | Node >=20；支持 React 18 | 轻量自研路由，不推荐 |
