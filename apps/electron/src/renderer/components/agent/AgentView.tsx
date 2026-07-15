@@ -17,7 +17,7 @@ import * as React from 'react'
 import { unstable_batchedUpdates } from 'react-dom'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, X, Copy, Check, Brain, Sparkles, Eye } from 'lucide-react'
+import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, X, Copy, Check, Brain, Sparkles, Eye, Loader2 } from 'lucide-react'
 import { AgentMessages } from './AgentMessages'
 import { AgentHeader } from './AgentHeader'
 import { AgentMessageQueue } from './AgentMessageQueue'
@@ -110,7 +110,7 @@ import { AgentSessionProvider } from '@/contexts/session-context'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
 import { useOpenPreview } from '@/components/diff/preview-opener'
-import type { AgentSendInput, AgentPendingFile, FileDialogLargeFile, ModelOption, SDKMessage, SDKUserMessage } from '@proma/shared'
+import type { AgentSendInput, AgentPendingFile, FileDialogLargeFile, ModelOption, OptimizedPromptResult, SDKMessage, SDKUserMessage } from '@proma/shared'
 import { inferContextWindow, MAX_ATTACHMENT_SIZE } from '@proma/shared'
 import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-utils'
 import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
@@ -202,9 +202,10 @@ function isStaleAgentQueueError(error: unknown): boolean {
 interface AgentThinkingPopoverProps {
   agentThinking: import('@proma/shared').ThinkingConfig | undefined
   onToggle: () => void
+  disabled?: boolean
 }
 
-function AgentThinkingPopover({ agentThinking, onToggle }: AgentThinkingPopoverProps): React.ReactElement {
+function AgentThinkingPopover({ agentThinking, onToggle, disabled = false }: AgentThinkingPopoverProps): React.ReactElement {
   const [thinkingExpanded, setThinkingExpanded] = useAtom(thinkingExpandedAtom)
   const [open, setOpen] = React.useState(false)
   const hoverTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -238,6 +239,7 @@ function AgentThinkingPopover({ agentThinking, onToggle }: AgentThinkingPopoverP
             isEnabled && inputToolbarActiveButtonClass
           )}
           onClick={onToggle}
+          disabled={disabled}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
@@ -259,6 +261,7 @@ function AgentThinkingPopover({ agentThinking, onToggle }: AgentThinkingPopoverP
             <Switch
               checked={isEnabled}
               onCheckedChange={onToggle}
+              disabled={disabled}
               className="h-4 w-7 [&>span]:size-3 [&>span]:data-[state=checked]:translate-x-3"
             />
           </div>
@@ -495,6 +498,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   // 按 sessionId 切片订阅 drafts/draftHtml：仅本 session 草稿变化才让 AgentView 重渲染。
   // 输入框每次按键都会写整 Map atom，若直接订阅整 Map，AgentView 跟着每键重渲染。
   const inputContent = useAtomValue(agentSessionDraftAtomFamily(sessionId))
+  const [isOptimizingPrompt, setIsOptimizingPrompt] = React.useState(false)
+  const optimizeRunIdRef = React.useRef(0)
   const setDraftsMap = useSetAtom(agentSessionDraftsAtom)
   const setInputContent = React.useCallback((value: string) => {
     setDraftsMap((prev) => {
@@ -1343,6 +1348,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   /** 打开文件选择对话框 */
   const handleOpenFileDialog = React.useCallback(async (): Promise<void> => {
+    if (isOptimizingPrompt) return
     try {
       const result = await window.electronAPI.openFileDialog()
       const largeFiles = result.largeFiles ?? []
@@ -1386,10 +1392,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     } catch (error) {
       console.error('[AgentView] 文件选择对话框失败:', error)
     }
-  }, [addLargeDialogFilesAsReferences, setPendingFiles])
+  }, [addLargeDialogFilesAsReferences, isOptimizingPrompt, setPendingFiles])
 
   /** 附加文件夹（不复制，仅记录路径） */
   const handleAttachFolder = React.useCallback(async (): Promise<void> => {
+    if (isOptimizingPrompt) return
     try {
       const result = await window.electronAPI.openFolderDialog()
       if (!result) return
@@ -1410,7 +1417,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       console.error('[AgentView] 附加文件夹失败:', error)
       toast.error('附加文件夹失败')
     }
-  }, [sessionId, setAttachedDirsMap])
+  }, [isOptimizingPrompt, sessionId, setAttachedDirsMap])
 
   /** 移除待发送文件 */
   const handleRemoveFile = React.useCallback((id: string): void => {
@@ -2291,7 +2298,77 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   }, [togglePreviewPanel])
 
   const hasTextInput = inputContent.trim().length > 0
-  const canSend = messagesLoaded && (streaming || !messagesRefreshing) && (hasTextInput || pendingFiles.length > 0 || !!suggestion) && agentChannelId !== null && hasAvailableModel && (!streaming || hasTextInput)
+  const canOptimizePrompt = React.useMemo(() => {
+    const naturalText = inputContent.replace(/(?<!\S)[@/#&][^\s，。！？；：,!?;:]+/g, '').trim()
+    return naturalText.length > 0 && messagesLoaded && !streaming && agentChannelId !== null && agentModelId !== null && hasAvailableModel
+  }, [inputContent, messagesLoaded, streaming, agentChannelId, agentModelId, hasAvailableModel])
+  const canSend = messagesLoaded && (streaming || !messagesRefreshing) && !isOptimizingPrompt && (hasTextInput || pendingFiles.length > 0 || !!suggestion) && agentChannelId !== null && hasAvailableModel && (!streaming || hasTextInput)
+
+  const handleCancelPromptOptimization = React.useCallback(async (): Promise<void> => {
+    optimizeRunIdRef.current += 1
+    await window.electronAPI.cancelPromptOptimization({ mode: 'agent', sessionId }).catch(console.error)
+    setIsOptimizingPrompt(false)
+  }, [sessionId])
+
+  const handleOptimizePrompt = React.useCallback(async (): Promise<void> => {
+    if (!canOptimizePrompt || !agentChannelId || !agentModelId || isOptimizingPrompt) return
+    const originalText = inputContent
+    const originalHtml = inputHtmlContent
+    const runId = optimizeRunIdRef.current + 1
+    optimizeRunIdRef.current = runId
+    setIsOptimizingPrompt(true)
+
+    try {
+      const result: OptimizedPromptResult = await window.electronAPI.optimizePrompt({
+        mode: 'agent',
+        draftText: originalText,
+        draftHtml: originalHtml,
+        sessionId,
+        workspaceId: currentWorkspaceId || undefined,
+        workspaceSlug: workspaceSlug || undefined,
+        workspacePath: sessionPath || undefined,
+        currentModel: { channelId: agentChannelId, modelId: agentModelId },
+      })
+      if (optimizeRunIdRef.current !== runId) return
+      if (result.status === 'cancelled') return
+      if (result.status !== 'success' || !result.optimizedText) {
+        toast.error(result.errorMessage ?? '提示词优化失败')
+        return
+      }
+      setInputContent(result.optimizedText)
+      if (result.optimizedHtml) setInputHtmlContent(result.optimizedHtml)
+      toast.success('已优化提示词', {
+        duration: Infinity,
+        closeButton: true,
+        action: {
+          label: '撤销',
+          onClick: () => {
+            setInputContent(originalText)
+            setInputHtmlContent(originalHtml)
+          },
+        },
+      })
+    } catch (error) {
+      if (optimizeRunIdRef.current === runId) {
+        toast.error(error instanceof Error ? error.message : '提示词优化失败')
+      }
+    } finally {
+      if (optimizeRunIdRef.current === runId) setIsOptimizingPrompt(false)
+    }
+  }, [
+    canOptimizePrompt,
+    agentChannelId,
+    agentModelId,
+    isOptimizingPrompt,
+    inputContent,
+    inputHtmlContent,
+    sessionId,
+    currentWorkspaceId,
+    workspaceSlug,
+    sessionPath,
+    setInputContent,
+    setInputHtmlContent,
+  ])
 
   const inputToolbarItems = React.useMemo<ToolbarItem[]>(() => [
     {
@@ -2311,6 +2388,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       node: (
         <AgentThinkingPopover
           agentThinking={agentThinking}
+          disabled={isOptimizingPrompt}
           onToggle={() => {
             const next = agentThinking?.type === 'adaptive'
               ? { type: 'disabled' as const }
@@ -2321,7 +2399,32 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         />
       ),
     },
-    { key: 'speech', node: <SpeechButton className={inputToolbarButtonClass} /> },
+    { key: 'speech', node: <SpeechButton className={inputToolbarButtonClass} disabled={isOptimizingPrompt} /> },
+    {
+      key: 'optimize',
+      node: (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn(
+                inputToolbarButtonClass,
+                (!canOptimizePrompt && !isOptimizingPrompt) && inputToolbarDisabledButtonClass
+              )}
+              onClick={() => { void (isOptimizingPrompt ? handleCancelPromptOptimization() : handleOptimizePrompt()) }}
+              disabled={!canOptimizePrompt && !isOptimizingPrompt}
+            >
+              {isOptimizingPrompt ? <Loader2 className="size-5 animate-spin" /> : <Sparkles className="size-5" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            <p>{isOptimizingPrompt ? '取消优化' : '优化提示词'}</p>
+          </TooltipContent>
+        </Tooltip>
+      ),
+    },
     {
       key: 'attach-file',
       node: (
@@ -2333,6 +2436,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               size="icon"
               className={inputToolbarButtonClass}
               onClick={handleOpenFileDialog}
+              disabled={isOptimizingPrompt}
             >
               <Paperclip className="size-5" />
             </Button>
@@ -2354,6 +2458,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               size="icon"
               className={inputToolbarButtonClass}
               onClick={handleAttachFolder}
+              disabled={isOptimizingPrompt}
             >
               <FolderPlus className="size-5" />
             </Button>
@@ -2398,6 +2503,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     sessionId,
     agentThinking,
     setAgentThinking,
+    canOptimizePrompt,
+    isOptimizingPrompt,
+    handleCancelPromptOptimization,
+    handleOptimizePrompt,
     handleOpenFileDialog,
     handleAttachFolder,
     contextStatus.inputTokens,
@@ -2601,7 +2710,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
                     ? '请先在设置中选择 Agent 供应商'
                     : '暂无可用模型，请先在设置中启用渠道'
               }
-              disabled={!agentChannelId || !hasAvailableModel}
+              disabled={!agentChannelId || !hasAvailableModel || isOptimizingPrompt}
               autoFocusTrigger={sessionId}
               collapsible
               enableMentions
