@@ -28,6 +28,15 @@ button, input { font: inherit; }
     @apply inline-flex h-10 items-center rounded-lg px-3 text-muted transition-colors hover:bg-panel hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent;
   }
   .nav-link-active { @apply text-ink; }
+  .scope-tab { @apply relative pb-3 text-sm text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent; }
+  .scope-tab-active { @apply font-medium text-ink after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-accent; }
+  .category-chip { @apply h-10 shrink-0 rounded-lg border border-line bg-panel px-4 text-sm text-muted transition hover:-translate-y-0.5 hover:border-[#c9c4b8] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent; }
+  .category-chip-active { @apply border-ink bg-ink text-white hover:border-ink hover:text-white; }
+  .skill-card { @apply flex min-h-64 flex-col rounded-xl border border-line bg-panel p-5 shadow-card transition duration-200 hover:-translate-y-1 hover:border-[#c9c4b8] hover:shadow-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-canvas; }
+  .page-button { @apply grid size-10 place-items-center rounded-lg border border-line bg-panel text-sm transition hover:border-ink disabled:cursor-not-allowed disabled:opacity-35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent; }
+  .page-button-active { @apply border-accent bg-accent text-white hover:border-accent; }
+  .market-state { @apply mt-8 flex min-h-72 flex-col items-center justify-center rounded-xl border border-dashed border-line bg-panel px-6 text-center; }
+  .market-action { @apply mt-5 h-10 rounded-lg bg-ink px-5 text-sm font-medium text-white transition hover:bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent; }
 }
 
 .skip-link {

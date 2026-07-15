@@ -1,4 +1,10 @@
-import type { MarketplaceApiError } from '@proma/shared'
+import type {
+  MarketplaceApiError,
+  MarketplaceCategory,
+  MarketplacePaginatedResponse,
+  MarketplaceSearchParams,
+  MarketplaceSkillSummary,
+} from '@proma/shared'
 
 const DEFAULT_API_URL = 'http://localhost:4310/api/v1'
 
@@ -31,6 +37,26 @@ export class MarketplaceApiClient {
     if (!response.ok) throw new MarketplaceRequestError(await response.json() as MarketplaceApiError)
     return response.json() as Promise<T>
   }
+
+  listCategories(signal?: AbortSignal): Promise<MarketplaceCategory[]> {
+    return this.get('/categories', signal)
+  }
+
+  listSkills(params: MarketplaceSearchParams, signal?: AbortSignal): Promise<MarketplacePaginatedResponse<MarketplaceSkillSummary>> {
+    return this.get(buildMarketplaceSearchPath(params), signal)
+  }
+}
+
+export function buildMarketplaceSearchPath(params: MarketplaceSearchParams): string {
+  const query = new URLSearchParams()
+  if (params.query) query.set('query', params.query)
+  if (params.scope && params.scope !== 'all') query.set('scope', params.scope)
+  if (params.category) query.set('category', params.category)
+  if (params.sort && params.sort !== 'popular') query.set('sort', params.sort)
+  if (params.page && params.page > 1) query.set('page', String(params.page))
+  if (params.pageSize) query.set('pageSize', String(params.pageSize))
+  const suffix = query.toString()
+  return `/skills${suffix ? `?${suffix}` : ''}`
 }
 
 export const marketplaceApi = new MarketplaceApiClient()
