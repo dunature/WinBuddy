@@ -25,7 +25,7 @@ export function readMarketplaceSkillSource(skillDir: string): MarketplaceSkillSo
   if (!existsSync(sourcePath)) return undefined
   try {
     const parsed = JSON.parse(readFileSync(sourcePath, 'utf8')) as UnknownSkillSource
-    return parsed.sourceType === 'marketplace' ? parsed as MarketplaceSkillSource : undefined
+    return isMarketplaceSource(parsed) ? parsed : undefined
   } catch {
     return undefined
   }
@@ -47,8 +47,8 @@ export function detectMarketplaceInstallConflict(input: MarketplaceConflictCheck
   } catch {
     return conflict('different-source', input)
   }
-  if (rawSource.sourceType !== 'marketplace') return conflict('different-source', input)
-  const source = rawSource as MarketplaceSkillSource
+  if (!isMarketplaceSource(rawSource)) return conflict('different-source', input)
+  const source = rawSource
   if (source.marketplaceSkillId !== input.marketplaceSkillId || source.slug !== input.slug) return conflict('different-source', input, source)
   const changedFiles = source.files ? diffFileHashes(source.files, collectMarketplaceFileHashes(input.targetDir)) : []
   if (changedFiles.length > 0) return conflict('locally-modified', input, source, changedFiles)
@@ -77,4 +77,15 @@ function walk(rootDir: string, currentDir: string, output: Record<string, string
 
 function conflict(kind: MarketplaceInstallConflict['kind'], input: MarketplaceConflictCheckInput, source?: MarketplaceSkillSource, changedFiles: string[] = []): MarketplaceInstallConflict {
   return { kind, slug: input.slug, localVersion: source?.version, marketplaceVersion: input.marketplaceVersion, changedFiles, localSource: source }
+}
+
+function isMarketplaceSource(source: UnknownSkillSource): source is MarketplaceSkillSource {
+  const candidate = source as Partial<MarketplaceSkillSource>
+  return candidate.sourceType === 'marketplace'
+    && candidate.schemaVersion === 1
+    && typeof candidate.marketplaceSkillId === 'string'
+    && typeof candidate.slug === 'string'
+    && typeof candidate.version === 'string'
+    && typeof candidate.sha256 === 'string'
+    && typeof candidate.installedAt === 'string'
 }

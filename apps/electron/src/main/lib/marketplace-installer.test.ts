@@ -5,11 +5,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
 import type { MarketplaceInstallState } from '@proma/shared'
-import { createMarketplaceInstall, getMarketplaceInstallerSession, resolveMarketplaceInstallConflict, startMarketplaceInstall } from './marketplace-installer'
+import { cancelMarketplaceInstall, createMarketplaceInstall, getMarketplaceInstallerSession, resolveMarketplaceInstallConflict, startMarketplaceInstall } from './marketplace-installer'
 
 const home = mkdtempSync(join(tmpdir(), 'proma-marketplace-home-'))
 const configDir = join(home, '.proma')
 const zipPath = join(home, 'skill.zip')
+const unsafeZipPath = join(home, 'unsafe.zip')
+let servedZipPath = zipPath
+let slowDownload = false
 let advertisedHash = ''
 let validHash = ''
 let server: ReturnType<typeof Bun.serve>
@@ -41,6 +44,9 @@ permissions:
 `))
   zip.addFile('references/guide.md', Buffer.from('# Guide'))
   zip.writeZip(zipPath)
+  const unsafeZip = new AdmZip()
+  unsafeZip.addFile('SKILL.md', Buffer.alloc(2 * 1024 * 1024))
+  unsafeZip.writeZip(unsafeZipPath)
   validHash = createHash('sha256').update(readFileSync(zipPath)).digest('hex')
   advertisedHash = validHash
   mkdirSync(configDir, { recursive: true })
@@ -53,8 +59,15 @@ permissions:
         installEvents.push(await request.json() as Record<string, unknown>)
         return new Response(null, { status: 202 })
       }
-      if (url.pathname === '/package.zip') return new Response(Bun.file(zipPath), { headers: { 'content-length': String(Bun.file(zipPath).size) } })
-      return Response.json({ skillId: 'skill-1', slug: 'research', version: '1.0.0', sha256: advertisedHash, size: Bun.file(zipPath).size, downloadUrl: `${url.origin}/package.zip`, expiresAt: new Date(Date.now() + 60_000).toISOString() })
+      if (url.pathname === '/package.zip') {
+        if (slowDownload) {
+          const bytes = new Uint8Array(await Bun.file(servedZipPath).arrayBuffer())
+          let offset = 0
+          return new Response(new ReadableStream({ async pull(controller) { await Bun.sleep(5); if (offset >= bytes.length) { controller.close(); return }; const next = Math.min(offset + 16, bytes.length); controller.enqueue(bytes.slice(offset, next)); offset = next } }), { headers: { 'content-length': String(bytes.length) } })
+        }
+        return new Response(Bun.file(servedZipPath), { headers: { 'content-length': String(Bun.file(servedZipPath).size) } })
+      }
+      return Response.json({ skillId: 'skill-1', slug: 'research', version: '1.0.0', sha256: advertisedHash, size: Bun.file(servedZipPath).size, downloadUrl: `${url.origin}/package.zip`, expiresAt: new Date(Date.now() + 60_000).toISOString() })
     },
   })
   writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ marketplaceApiUrl: `${server.url.origin}` }))
@@ -104,5 +117,32 @@ describe('Marketplace 安装下载与 staging', () => {
     expect(states.at(-1)?.status).toBe('error')
     expect(existsSync(tempDir)).toBe(false)
     expect(getMarketplaceInstallerSession(created.installId)).toBeUndefined()
+  })
+
+  test('下载中取消会停止任务并清理残留', async () => {
+    servedZipPath = zipPath
+    advertisedHash = validHash
+    slowDownload = true
+    const created = createMarketplaceInstall({ skillId: 'skill-1', slug: 'research', version: '1.0.0', workspaceSlug: 'test-workspace' })
+    const tempDir = getMarketplaceInstallerSession(created.installId)?.tempDir ?? ''
+    const states: MarketplaceInstallState[] = []
+    await startMarketplaceInstall(created.installId, (state) => {
+      states.push(state)
+      if (state.status === 'downloading') cancelMarketplaceInstall(created.installId)
+    })
+    slowDownload = false
+    expect(states.at(-1)?.status).toBe('cancelled')
+    expect(existsSync(tempDir)).toBe(false)
+  })
+
+  test('高压缩比包在预检阶段拒绝并清理', async () => {
+    servedZipPath = unsafeZipPath
+    advertisedHash = createHash('sha256').update(readFileSync(unsafeZipPath)).digest('hex')
+    const created = createMarketplaceInstall({ skillId: 'skill-1', slug: 'research', version: '1.0.0', workspaceSlug: 'test-workspace' })
+    const tempDir = getMarketplaceInstallerSession(created.installId)?.tempDir ?? ''
+    const states: MarketplaceInstallState[] = []
+    await expect(startMarketplaceInstall(created.installId, (state) => states.push(state))).rejects.toThrow('压缩比超过安全限制')
+    expect((states.at(-1) as Extract<MarketplaceInstallState, { status: 'error' }>).error.code).toBe('PACKAGE_UNSAFE')
+    expect(existsSync(tempDir)).toBe(false)
   })
 })

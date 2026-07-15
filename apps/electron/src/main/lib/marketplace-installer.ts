@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import yauzl, { type Entry, type ZipFile } from 'yauzl'
 import { parseSkillManifest, validateMarketplacePackageEntries, type MarketplacePackageEntry } from '@proma/marketplace-domain'
@@ -140,26 +141,25 @@ async function fetchPackageMetadata(session: MarketplaceInstallerSession): Promi
 }
 
 async function downloadPackage(session: MarketplaceInstallerSession, metadata: MarketplacePackageDownload, onProgress: ProgressCallback): Promise<void> {
-  const response = await fetchWithRedirectLimit(metadata.downloadUrl, session.controller.signal)
+  const downloadSignal = AbortSignal.any([session.controller.signal, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)])
+  const response = await fetchWithRedirectLimit(metadata.downloadUrl, downloadSignal)
   if (!response.ok || !response.body) throw installerError('PACKAGE_DOWNLOAD_FAILED', `安装包下载失败（HTTP ${response.status}）`)
   const total = Number(response.headers.get('content-length') || metadata.size || 0)
   if (total > MAX_PACKAGE_BYTES) throw installerError('PACKAGE_TOO_LARGE', '安装包超过 25 MB 限制')
   const reader = response.body.getReader()
-  const output = createWriteStream(session.packagePath, { flags: 'wx', mode: 0o600 })
   let received = 0
   try {
-    while (true) {
-      const chunk = await reader.read()
-      if (chunk.done) break
-      received += chunk.value.byteLength
-      if (received > MAX_PACKAGE_BYTES) throw installerError('PACKAGE_TOO_LARGE', '安装包超过 25 MB 限制')
-      if (!output.write(chunk.value)) await new Promise<void>((resolve) => output.once('drain', resolve))
-      onProgress({ status: 'downloading', installId: session.installId, received, total: total || undefined })
-    }
-    await new Promise<void>((resolve, reject) => output.end((error?: Error | null) => error ? reject(error) : resolve()))
-  } catch (error) {
-    output.destroy()
-    throw error
+    const chunks = Readable.from((async function* (): AsyncGenerator<Uint8Array> {
+      while (true) {
+        const chunk = await reader.read()
+        if (chunk.done) return
+        received += chunk.value.byteLength
+        if (received > MAX_PACKAGE_BYTES) throw installerError('PACKAGE_TOO_LARGE', '安装包超过 25 MB 限制')
+        onProgress({ status: 'downloading', installId: session.installId, received, total: total || undefined })
+        yield chunk.value
+      }
+    })())
+    await pipeline(chunks, createWriteStream(session.packagePath, { flags: 'wx', mode: 0o600 }), { signal: downloadSignal })
   } finally {
     reader.releaseLock()
   }
@@ -168,6 +168,8 @@ async function downloadPackage(session: MarketplaceInstallerSession, metadata: M
 async function fetchWithRedirectLimit(url: string, signal: AbortSignal): Promise<Response> {
   let currentUrl = url
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
+    const protocol = new URL(currentUrl).protocol
+    if (protocol !== 'https:' && protocol !== 'http:') throw installerError('PACKAGE_DOWNLOAD_FAILED', '安装包地址协议不安全')
     const response = await fetch(currentUrl, { redirect: 'manual', signal: AbortSignal.any([signal, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)]) })
     if (![301, 302, 303, 307, 308].includes(response.status)) return response
     const location = response.headers.get('location')
@@ -299,8 +301,13 @@ async function reportMarketplaceInstall(session: MarketplaceInstallerSession, in
 }
 
 function cleanupSession(session: MarketplaceInstallerSession): void {
-  if (existsSync(session.tempDir)) rmSyncWithRetry(session.tempDir, { recursive: true, force: true })
-  sessions.delete(session.installId)
+  try {
+    if (existsSync(session.tempDir)) rmSyncWithRetry(session.tempDir, { recursive: true, force: true })
+  } catch (error) {
+    console.warn(`[社区市场] 临时目录清理失败 (${session.installId}):`, error)
+  } finally {
+    sessions.delete(session.installId)
+  }
 }
 
 function assertSafeIdentifier(value: string, label: string): void {
