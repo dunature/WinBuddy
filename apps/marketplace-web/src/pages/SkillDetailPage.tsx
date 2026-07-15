@@ -4,6 +4,8 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import type { MarketplaceSkillDetail } from '@proma/shared'
 import { GuideToc } from '../components/GuideToc.tsx'
 import { MarkdownGuide } from '../components/MarkdownGuide.tsx'
+import { RemoteFileBrowser } from '../components/RemoteFileBrowser.tsx'
+import { ExampleBrowser } from '../components/ExampleBrowser.tsx'
 import { marketplaceApi, MarketplaceRequestError } from '../lib/api-client.ts'
 import { extractGuideHeadings } from '../lib/markdown-headings.ts'
 
@@ -69,7 +71,8 @@ export function SkillDetailPage(): React.ReactElement {
               <MarkdownGuide markdown={skill.guideMarkdown} />
             </div>
           )}
-          {tab !== 'guide' && <DetailTabPlaceholder tab={tab} />}
+          {tab === 'files' && <RemoteFileBrowser slug={skill.slug} version={skill.version} />}
+          {tab === 'examples' && <ExampleBrowser slug={skill.slug} version={skill.version} />}
         </div>
 
         <UsageSidebar skill={skill} />
@@ -97,10 +100,6 @@ function UsageSidebar({ skill }: { skill: MarketplaceSkillDetail }): React.React
       {skill.repository && <a className="mt-4 flex items-center justify-center gap-2 text-sm text-muted hover:text-accent" href={skill.repository} target="_blank" rel="noreferrer"><ExternalLink size={14} />查看来源</a>}
     </aside>
   )
-}
-
-function DetailTabPlaceholder({ tab }: { tab: Exclude<DetailTab, 'guide'> }): React.ReactElement {
-  return <div className="mt-6 grid min-h-80 place-items-center rounded-xl border border-dashed border-line bg-panel text-center text-muted">{tab === 'files' ? '文件浏览器正在加载' : '运行案例正在加载'}</div>
 }
 
 function DetailSkeleton(): React.ReactElement {

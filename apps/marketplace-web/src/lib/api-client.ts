@@ -5,6 +5,9 @@ import type {
   MarketplaceSearchParams,
   MarketplaceSkillSummary,
   MarketplaceSkillDetail,
+  MarketplaceExample,
+  MarketplaceFileContent,
+  MarketplaceFileNode,
 } from '@proma/shared'
 
 const DEFAULT_API_URL = 'http://localhost:4310/api/v1'
@@ -49,6 +52,18 @@ export class MarketplaceApiClient {
 
   getSkill(slug: string, signal?: AbortSignal): Promise<MarketplaceSkillDetail> {
     return this.get(`/skills/${encodeURIComponent(slug)}`, signal)
+  }
+
+  listFiles(slug: string, version: string, signal?: AbortSignal): Promise<MarketplaceFileNode[]> {
+    return this.get(`/skills/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/files`, signal)
+  }
+
+  getFile(slug: string, version: string, path: string, signal?: AbortSignal): Promise<MarketplaceFileContent> {
+    return this.get(`/skills/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/files/content?path=${encodeURIComponent(path)}`, signal)
+  }
+
+  listExamples(slug: string, version: string, signal?: AbortSignal): Promise<MarketplaceExample[]> {
+    return this.get(`/skills/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/examples`, signal)
   }
 }
 

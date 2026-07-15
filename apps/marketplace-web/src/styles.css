@@ -39,6 +39,10 @@ button, input { font: inherit; }
   .market-action { @apply mt-5 h-10 rounded-lg bg-ink px-5 text-sm font-medium text-white transition hover:bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent; }
   .detail-tab { @apply h-10 flex-1 rounded-lg text-sm text-muted transition hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent; }
   .detail-tab-active { @apply bg-accent font-medium text-white shadow-sm hover:text-white; }
+  .file-tree-item { @apply flex min-h-9 w-full items-center gap-2 rounded-lg px-2 text-left text-sm text-muted transition hover:bg-panel hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent; }
+  .file-tree-item-active { @apply bg-[#fff0e9] text-accent hover:bg-[#fff0e9] hover:text-accent; }
+  .example-item { @apply block w-full rounded-lg p-3 text-left transition hover:bg-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent; }
+  .example-item-active { @apply bg-[#fff0e9] text-ink hover:bg-[#fff0e9]; }
 }
 
 .guide-content > :first-child { margin-top: 0; }
