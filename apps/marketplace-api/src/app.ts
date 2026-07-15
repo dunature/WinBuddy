@@ -4,10 +4,12 @@ import { requestId } from 'hono/request-id'
 import type { MarketplaceApiError } from '@proma/shared'
 import type { MarketplaceApiConfig } from './config.ts'
 import { MarketplaceApiException } from './errors.ts'
+import { createMarketplacePublicRoutes, type MarketplacePublicRouteServices } from './routes/public-routes.ts'
 
 export interface CreateMarketplaceAppOptions {
   config: MarketplaceApiConfig
   version?: string
+  services?: MarketplacePublicRouteServices
 }
 
 export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono {
@@ -24,6 +26,8 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
     status: 'ok',
     version: options.version ?? '0.1.0',
   }))
+
+  if (options.services) app.route('/api/v1', createMarketplacePublicRoutes(options.services))
 
   app.notFound((context) => context.json<MarketplaceApiError>({
     code: 'SKILL_NOT_FOUND',
