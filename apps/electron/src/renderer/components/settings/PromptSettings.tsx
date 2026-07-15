@@ -12,6 +12,7 @@ import { Plus, Trash2, Star } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { ModelSelector } from '@/components/chat/ModelSelector'
 import { cn } from '@/lib/utils'
 import {
   SettingsSection,
@@ -23,7 +24,7 @@ import {
   selectedPromptIdAtom,
   defaultPromptIdAtom,
 } from '@/atoms/system-prompt-atoms'
-import type { SystemPrompt, SystemPromptCreateInput, SystemPromptUpdateInput } from '@proma/shared'
+import type { ModelOption, PromptOptimizationModelSelection, SystemPrompt, SystemPromptCreateInput, SystemPromptUpdateInput } from '@proma/shared'
 
 /** 防抖保存延迟 (ms) */
 const DEBOUNCE_DELAY = 500
@@ -36,6 +37,7 @@ export function PromptSettings(): React.ReactElement {
   const [editName, setEditName] = React.useState('')
   const [editContent, setEditContent] = React.useState('')
   const [hoveredId, setHoveredId] = React.useState<string | null>(null)
+  const [optimizationModel, setOptimizationModel] = React.useState<PromptOptimizationModelSelection | null>(null)
 
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -49,6 +51,9 @@ export function PromptSettings(): React.ReactElement {
   React.useEffect(() => {
     window.electronAPI.getSystemPromptConfig().then((cfg) => {
       setConfig(cfg)
+    }).catch(console.error)
+    window.electronAPI.getSettings().then((settings) => {
+      setOptimizationModel(settings.promptOptimizationModel ?? null)
     }).catch(console.error)
   }, [setConfig])
 
@@ -156,6 +161,23 @@ export function PromptSettings(): React.ReactElement {
     }
   }
 
+  /** 更新提示词优化模型 */
+  const handleOptimizationModelSelect = async (option: ModelOption): Promise<void> => {
+    const next = { channelId: option.channelId, modelId: option.modelId }
+    setOptimizationModel(next)
+    await window.electronAPI.updateSettings({ promptOptimizationModel: next }).catch((error) => {
+      console.error('[提示词设置] 更新优化模型失败:', error)
+    })
+  }
+
+  /** 跟随当前会话模型 */
+  const handleFollowCurrentModel = async (): Promise<void> => {
+    setOptimizationModel(null)
+    await window.electronAPI.updateSettings({ promptOptimizationModel: undefined }).catch((error) => {
+      console.error('[提示词设置] 清除优化模型失败:', error)
+    })
+  }
+
   return (
     <div className="space-y-6">
       {/* 提示词列表 */}
@@ -232,6 +254,34 @@ export function PromptSettings(): React.ReactElement {
             checked={config.appendDateTimeAndUserName}
             onCheckedChange={handleAppendChange}
           />
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection title="提示词优化">
+        <SettingsCard divided={false} className="p-4 space-y-3">
+          <div className="flex flex-col gap-2">
+            <div>
+              <div className="text-sm font-medium text-foreground">提示词优化模型</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                默认跟随当前会话模型；也可以指定任一已启用模型。
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant={optimizationModel ? 'outline' : 'secondary'}
+                size="sm"
+                onClick={handleFollowCurrentModel}
+              >
+                跟随当前会话模型
+              </Button>
+              <ModelSelector
+                externalSelectedModel={optimizationModel}
+                onModelSelect={(option) => { void handleOptimizationModelSelect(option) }}
+                showChannelInTrigger
+              />
+            </div>
+          </div>
         </SettingsCard>
       </SettingsSection>
     </div>

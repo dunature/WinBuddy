@@ -56,3 +56,6 @@ export * from './automation'
 
 // Token 用量统计相关类型
 export * from './usage'
+
+// 提示词优化相关类型
+export * from './prompt-optimization'

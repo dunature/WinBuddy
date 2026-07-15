@@ -4,7 +4,7 @@
  * 主题模式、IPC 通道等设置相关定义。
  */
 
-import type { EnvironmentCheckResult, ThinkingConfig, AgentEffort, FeishuSessionMirrorSettings, UsageBudgetConfig } from '@proma/shared'
+import type { EnvironmentCheckResult, ThinkingConfig, AgentEffort, FeishuSessionMirrorSettings, UsageBudgetConfig, PromptOptimizationModelSelection } from '@proma/shared'
 import type { VoiceDictationPersistedSettings } from './voice-dictation'
 
 /** 通知音场景类型 */
@@ -154,6 +154,8 @@ export interface AppSettings {
   autoCleanupArchivedDays?: number
   /** Token 用量预算提醒设置 */
   usageBudget?: UsageBudgetConfig
+  /** 提示词优化模型；缺省表示跟随当前会话模型 */
+  promptOptimizationModel?: PromptOptimizationModelSelection
   /** 主窗口状态（大小、位置、是否最大化） */
   mainWindowState?: MainWindowState
 }
