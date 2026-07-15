@@ -132,13 +132,14 @@ import type {
   MarketplaceCreateInstallResult,
   MarketplaceStartInstallInput,
   MarketplaceCancelInstallInput,
+  MarketplaceResolveConflictInput,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
 import { getUnstagedChanges, getFileDiff, getUntrackedContent, revertFile, getDiffContents, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
 import { registerPromaFilePath } from './lib/local-file-protocol'
 import { registerUpdaterIpc } from './lib/updater/updater-ipc'
-import { cancelMarketplaceInstall, createMarketplaceInstall, startMarketplaceInstall } from './lib/marketplace-installer'
+import { cancelMarketplaceInstall, createMarketplaceInstall, resolveMarketplaceInstallConflict, startMarketplaceInstall } from './lib/marketplace-installer'
 import {
   listChannels,
   createChannel,
@@ -1788,13 +1789,24 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     MARKETPLACE_IPC_CHANNELS.START_INSTALL,
     async (event, input: MarketplaceStartInstallInput): Promise<void> => {
-      await startMarketplaceInstall(input.installId, (state) => event.sender.send(MARKETPLACE_IPC_CHANNELS.INSTALL_PROGRESS, state))
+      await startMarketplaceInstall(input.installId, (state) => {
+        event.sender.send(MARKETPLACE_IPC_CHANNELS.INSTALL_PROGRESS, state)
+        if (state.status === 'success') event.sender.send(AGENT_IPC_CHANNELS.CAPABILITIES_CHANGED)
+      })
     },
   )
 
   ipcMain.handle(
     MARKETPLACE_IPC_CHANNELS.CANCEL_INSTALL,
     async (_event, input: MarketplaceCancelInstallInput): Promise<boolean> => cancelMarketplaceInstall(input.installId),
+  )
+
+  ipcMain.handle(
+    MARKETPLACE_IPC_CHANNELS.RESOLVE_CONFLICT,
+    async (event, input: MarketplaceResolveConflictInput): Promise<boolean> => resolveMarketplaceInstallConflict(input, (state) => {
+      event.sender.send(MARKETPLACE_IPC_CHANNELS.INSTALL_PROGRESS, state)
+      if (state.status === 'success') event.sender.send(AGENT_IPC_CHANNELS.CAPABILITIES_CHANGED)
+    }),
   )
 
   // ===== 代理配置相关 =====

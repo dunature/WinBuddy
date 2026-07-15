@@ -12,6 +12,8 @@ export interface MarketplaceSkillSource {
   version: string
   sha256: string
   installedAt: string
+  /** 安装时文件摘要，用于判断用户是否在本地修改；不包含来源文件自身 */
+  files?: Record<string, string>
 }
 
 export interface MarketplaceCreateInstallInput {

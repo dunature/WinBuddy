@@ -5,12 +5,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
 import type { MarketplaceInstallState } from '@proma/shared'
-import { cancelMarketplaceInstall, createMarketplaceInstall, getMarketplaceInstallerSession, startMarketplaceInstall } from './marketplace-installer'
+import { createMarketplaceInstall, getMarketplaceInstallerSession, resolveMarketplaceInstallConflict, startMarketplaceInstall } from './marketplace-installer'
 
 const home = mkdtempSync(join(tmpdir(), 'proma-marketplace-home-'))
 const configDir = join(home, '.proma')
 const zipPath = join(home, 'skill.zip')
 let advertisedHash = ''
+let validHash = ''
 let server: ReturnType<typeof Bun.serve>
 
 beforeAll(() => {
@@ -39,7 +40,8 @@ permissions:
 `))
   zip.addFile('references/guide.md', Buffer.from('# Guide'))
   zip.writeZip(zipPath)
-  advertisedHash = createHash('sha256').update(readFileSync(zipPath)).digest('hex')
+  validHash = createHash('sha256').update(readFileSync(zipPath)).digest('hex')
+  advertisedHash = validHash
   mkdirSync(configDir, { recursive: true })
   writeFileSync(join(configDir, 'agent-workspaces.json'), JSON.stringify({ version: 2, workspaces: [{ id: 'w1', name: 'Test', slug: 'test-workspace', createdAt: 1, updatedAt: 1 }] }))
   server = Bun.serve({
@@ -64,12 +66,26 @@ describe('Marketplace 安装下载与 staging', () => {
     const created = createMarketplaceInstall({ skillId: 'skill-1', slug: 'research', version: '1.0.0', workspaceSlug: 'test-workspace' })
     const states: MarketplaceInstallState[] = []
     await startMarketplaceInstall(created.installId, (state) => states.push(state))
-    const session = getMarketplaceInstallerSession(created.installId)
-    expect(session).toBeDefined()
-    expect(existsSync(join(session?.stagingDir ?? '', 'SKILL.md'))).toBe(true)
-    expect(existsSync(join(configDir, 'agent-workspaces', 'test-workspace', 'skills', 'research'))).toBe(false)
-    expect(states.at(-1)).toEqual({ status: 'verifying', installId: created.installId, step: 'manifest' })
-    expect(cancelMarketplaceInstall(created.installId)).toBe(true)
+    const target = join(configDir, 'agent-workspaces', 'test-workspace', 'skills', 'research')
+    expect(getMarketplaceInstallerSession(created.installId)).toBeUndefined()
+    expect(existsSync(join(target, 'SKILL.md'))).toBe(true)
+    expect(JSON.parse(readFileSync(join(target, '.proma-source.json'), 'utf8')).sha256).toBe(validHash)
+    expect(states.at(-1)?.status).toBe('success')
+  })
+
+  test('本地修改进入冲突，明确确认后备份并整体替换', async () => {
+    advertisedHash = validHash
+    const target = join(configDir, 'agent-workspaces', 'test-workspace', 'skills', 'research')
+    writeFileSync(join(target, 'SKILL.md'), '# locally modified')
+    const created = createMarketplaceInstall({ skillId: 'skill-1', slug: 'research', version: '1.0.0', workspaceSlug: 'test-workspace' })
+    const states: MarketplaceInstallState[] = []
+    await startMarketplaceInstall(created.installId, (state) => states.push(state))
+    expect(states.at(-1)?.status).toBe('conflict')
+    expect(resolveMarketplaceInstallConflict({ installId: created.installId, resolution: 'backup-and-replace' }, (state) => states.push(state))).toBe(true)
+    expect(states.at(-1)?.status).toBe('success')
+    expect(readFileSync(join(target, 'SKILL.md'), 'utf8')).toContain('schema_version: 1')
+    const backups = join(configDir, 'agent-workspaces', 'test-workspace', 'skill-backups')
+    expect(existsSync(backups)).toBe(true)
   })
 
   test('hash 不符时清理任务和临时目录', async () => {

@@ -1,13 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import yauzl, { type Entry, type ZipFile } from 'yauzl'
 import { parseSkillManifest, validateMarketplacePackageEntries, type MarketplacePackageEntry } from '@proma/marketplace-domain'
-import type { MarketplaceCreateInstallInput, MarketplaceCreateInstallResult, MarketplaceInstallError, MarketplaceInstallState, MarketplacePackageDownload } from '@proma/shared'
-import { getMarketplaceInstallsTempDir } from './config-paths'
+import type { MarketplaceCreateInstallInput, MarketplaceCreateInstallResult, MarketplaceInstallError, MarketplaceInstallState, MarketplacePackageDownload, MarketplaceResolveConflictInput, MarketplaceSkillSource } from '@proma/shared'
+import { getAgentWorkspacePath, getMarketplaceInstallsTempDir, getWorkspaceSkillsDir } from './config-paths'
 import { listAgentWorkspaces } from './agent-workspace-manager'
 import { getSettings } from './settings-service'
+import { rmSyncWithRetry, renameWithRetry } from './fs-retry'
+import { collectMarketplaceFileHashes, detectMarketplaceInstallConflict } from './marketplace-source'
 
 const DEFAULT_API_URL = 'https://marketplace.proma.ai/api/v1'
 const DOWNLOAD_TIMEOUT_MS = 60_000
@@ -23,7 +25,7 @@ export interface MarketplaceInstallerSession {
   tempDir: string
   packagePath: string
   stagingDir: string
-  expectedSha256?: string
+  expectedSha256: string
   controller: AbortController
   active: boolean
 }
@@ -49,6 +51,7 @@ export function createMarketplaceInstall(input: MarketplaceCreateInstallInput): 
     stagingDir: join(tempDir, 'staging'),
     controller: new AbortController(),
     active: false,
+    expectedSha256: '',
   }
   sessions.set(installId, session)
   return { installId, skillId: input.skillId, slug: input.slug, version: input.version, workspaceSlug: input.workspaceSlug }
@@ -69,6 +72,16 @@ export async function startMarketplaceInstall(installId: string, onProgress: Pro
     const manifest = parseSkillManifest(readFileSync(join(session.stagingDir, 'SKILL.md'), 'utf8'))
     if (!manifest.manifest || manifest.issues.some((issue) => issue.severity === 'error')) throw installerError('PACKAGE_INVALID', 'SKILL.md Manifest 校验失败')
     session.active = false
+    const targetDir = join(getWorkspaceSkillsDir(session.workspaceSlug), session.slug)
+    const conflict = detectMarketplaceInstallConflict({ slug: session.slug, marketplaceSkillId: session.skillId, marketplaceVersion: session.version, marketplaceSha256: session.expectedSha256, targetDir })
+    if (conflict === 'already-installed') {
+      onProgress(successState(session))
+      cleanupSession(session)
+    } else if (conflict) {
+      onProgress({ status: 'conflict', installId, conflict })
+    } else {
+      commitMarketplaceInstall(session, onProgress)
+    }
   } catch (error) {
     if (session.controller.signal.aborted) {
       cleanupSession(session)
@@ -86,6 +99,18 @@ export function cancelMarketplaceInstall(installId: string): boolean {
   if (!session) return false
   session.controller.abort()
   if (!session.active) cleanupSession(session)
+  return true
+}
+
+export function resolveMarketplaceInstallConflict(input: MarketplaceResolveConflictInput, onProgress: ProgressCallback): boolean {
+  const session = sessions.get(input.installId)
+  if (!session || session.active) return false
+  if (input.resolution === 'cancel') {
+    cleanupSession(session)
+    onProgress({ status: 'cancelled', installId: input.installId })
+    return true
+  }
+  commitMarketplaceInstall(session, onProgress)
   return true
 }
 
@@ -204,8 +229,47 @@ function requireSession(installId: string): MarketplaceInstallerSession {
   return session
 }
 
+function commitMarketplaceInstall(session: MarketplaceInstallerSession, onProgress: ProgressCallback): void {
+  const targetDir = join(getWorkspaceSkillsDir(session.workspaceSlug), session.slug)
+  const backupRoot = join(getAgentWorkspacePath(session.workspaceSlug), 'skill-backups')
+  const backupDir = join(backupRoot, `${session.slug}-${Date.now()}`)
+  let backupCreated = false
+  onProgress({ status: 'committing', installId: session.installId })
+  try {
+    const source: MarketplaceSkillSource = {
+      schemaVersion: 1,
+      sourceType: 'marketplace',
+      marketplaceSkillId: session.skillId,
+      slug: session.slug,
+      version: session.version,
+      sha256: session.expectedSha256,
+      installedAt: new Date().toISOString(),
+      files: collectMarketplaceFileHashes(session.stagingDir),
+    }
+    writeFileSync(join(session.stagingDir, '.proma-source.json'), JSON.stringify(source, null, 2), { encoding: 'utf8', mode: 0o600 })
+    if (existsSync(targetDir)) {
+      mkdirSync(backupRoot, { recursive: true })
+      renameWithRetry(targetDir, backupDir)
+      backupCreated = true
+    }
+    renameWithRetry(session.stagingDir, targetDir)
+    onProgress(successState(session))
+    cleanupSession(session)
+  } catch (error) {
+    if (backupCreated && !existsSync(targetDir) && existsSync(backupDir)) {
+      try { renameWithRetry(backupDir, targetDir) } catch (rollbackError) { console.error('[社区市场] 安装回滚失败:', rollbackError) }
+    }
+    onProgress({ status: 'error', installId: session.installId, error: { code: 'INSTALL_COMMIT_FAILED', message: error instanceof Error ? error.message : '写入 Skill 失败', retryable: false } })
+    throw error
+  }
+}
+
+function successState(session: MarketplaceInstallerSession): MarketplaceInstallState {
+  return { status: 'success', installId: session.installId, slug: session.slug, version: session.version, workspaceSlug: session.workspaceSlug }
+}
+
 function cleanupSession(session: MarketplaceInstallerSession): void {
-  if (existsSync(session.tempDir)) rmSync(session.tempDir, { recursive: true, force: true })
+  if (existsSync(session.tempDir)) rmSyncWithRetry(session.tempDir, { recursive: true, force: true })
   sessions.delete(session.installId)
 }
 

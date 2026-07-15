@@ -120,6 +120,7 @@ import type {
   MarketplaceCreateInstallResult,
   MarketplaceStartInstallInput,
   MarketplaceCancelInstallInput,
+  MarketplaceResolveConflictInput,
   MarketplaceInstallState,
 } from '@proma/shared'
 import type {
@@ -422,6 +423,7 @@ export interface ElectronAPI {
   createMarketplaceInstall: (input: MarketplaceCreateInstallInput) => Promise<MarketplaceCreateInstallResult>
   startMarketplaceInstall: (input: MarketplaceStartInstallInput) => Promise<void>
   cancelMarketplaceInstall: (input: MarketplaceCancelInstallInput) => Promise<boolean>
+  resolveMarketplaceInstallConflict: (input: MarketplaceResolveConflictInput) => Promise<boolean>
   onMarketplaceInstallProgress: (callback: (state: MarketplaceInstallState) => void) => () => void
 
   // ===== 代理配置相关 =====
@@ -1470,6 +1472,7 @@ const electronAPI: ElectronAPI = {
   createMarketplaceInstall: (input: MarketplaceCreateInstallInput) => ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.CREATE_INSTALL, input),
   startMarketplaceInstall: (input: MarketplaceStartInstallInput) => ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.START_INSTALL, input),
   cancelMarketplaceInstall: (input: MarketplaceCancelInstallInput) => ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.CANCEL_INSTALL, input),
+  resolveMarketplaceInstallConflict: (input: MarketplaceResolveConflictInput) => ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.RESOLVE_CONFLICT, input),
   onMarketplaceInstallProgress: (callback: (state: MarketplaceInstallState) => void) => {
     const listener = (_event: unknown, state: MarketplaceInstallState): void => callback(state)
     ipcRenderer.on(MARKETPLACE_IPC_CHANNELS.INSTALL_PROGRESS, listener)
