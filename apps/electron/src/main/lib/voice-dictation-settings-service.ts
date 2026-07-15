@@ -7,6 +7,7 @@
 import { safeStorage } from 'electron'
 import type { VoiceDictationSettings, VoiceDictationSettingsUpdate } from '../../types'
 import { getSettings, updateSettings } from './settings-service'
+import { DEFAULT_STYLE_PACK_ID } from './voice-style-pack-builtins'
 
 const DEFAULT_VOICE_DICTATION_SETTINGS: VoiceDictationSettings = {
   enabled: false,
@@ -18,6 +19,11 @@ const DEFAULT_VOICE_DICTATION_SETTINGS: VoiceDictationSettings = {
   endpointMode: 'async',
   outputMode: 'auto',
   customHotwords: '',
+  polish: {
+    enabled: false,
+    stylePackId: DEFAULT_STYLE_PACK_ID,
+    previewBeforeCommit: false,
+  },
 }
 
 function encryptSecret(value: string): string {
@@ -44,12 +50,20 @@ function decryptSecret(value: string): string {
 export function getVoiceDictationSettings(): VoiceDictationSettings {
   const raw = getSettings().voiceDictation ?? {}
   const encryptedAccessToken = raw.accessToken ?? raw.accessKey ?? ''
+  const polish = raw.polish ?? DEFAULT_VOICE_DICTATION_SETTINGS.polish
   return {
     ...DEFAULT_VOICE_DICTATION_SETTINGS,
     ...raw,
     appId: raw.appId ?? raw.appKey ?? '',
     accessToken: decryptSecret(encryptedAccessToken),
     customHotwords: typeof raw.customHotwords === 'string' ? raw.customHotwords : '',
+    polish: {
+      ...DEFAULT_VOICE_DICTATION_SETTINGS.polish,
+      ...polish,
+      stylePackId: polish.stylePackId || DEFAULT_VOICE_DICTATION_SETTINGS.polish.stylePackId,
+      previewBeforeCommit: polish.previewBeforeCommit ?? false,
+      enabled: polish.enabled ?? false,
+    },
   }
 }
 
@@ -61,6 +75,10 @@ export function updateVoiceDictationSettings(
   const next: VoiceDictationSettings = {
     ...current,
     ...updates,
+    polish: {
+      ...current.polish,
+      ...(updates.polish ?? {}),
+    },
     provider: 'doubao',
   }
 

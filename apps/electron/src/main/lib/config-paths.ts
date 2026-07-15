@@ -158,6 +158,24 @@ export function getSettingsPath(): string {
 }
 
 /**
+ * 获取语音风格包配置路径
+ *
+ * @returns ~/.proma/voice-style-packs.json
+ */
+export function getVoiceStylePacksPath(): string {
+  return join(getConfigDir(), 'voice-style-packs.json')
+}
+
+/**
+ * 获取语音结构化词典配置路径
+ *
+ * @returns ~/.proma/voice-dictionary.json
+ */
+export function getVoiceDictionaryPath(): string {
+  return join(getConfigDir(), 'voice-dictionary.json')
+}
+
+/**
  * 获取 Token 用量统计目录。
  *
  * @returns ~/.proma/usage/

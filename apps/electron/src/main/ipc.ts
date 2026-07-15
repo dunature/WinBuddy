@@ -22,6 +22,13 @@ import type {
   VoiceDictationStartInput,
   VoiceDictationStopInput,
   VoiceDictationTestResult,
+  VoiceDictionaryEntry,
+  VoiceDictionaryEntryInput,
+  VoicePolishCancelInput,
+  VoicePolishInput,
+  VoicePolishResult,
+  VoiceStylePack,
+  VoiceStylePackInput,
   MicPermissionResult,
 } from '../types'
 import type {
@@ -4155,6 +4162,71 @@ export function registerIpcHandlers(): void {
       const { getVoiceDictationSettings } = await import('./lib/voice-dictation-settings-service')
       const { commitVoiceDictationText } = await import('./lib/text-output-service')
       return commitVoiceDictationText(input.text, getVoiceDictationSettings())
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.POLISH,
+    async (_, input: VoicePolishInput): Promise<VoicePolishResult> => {
+      const { polishVoiceDictation } = await import('./lib/voice-polish-service')
+      return polishVoiceDictation(input)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.CANCEL_POLISH,
+    async (_, input: VoicePolishCancelInput): Promise<void> => {
+      const { cancelVoicePolish } = await import('./lib/voice-polish-service')
+      cancelVoicePolish(input.requestId)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.LIST_STYLE_PACKS,
+    async (): Promise<VoiceStylePack[]> => {
+      const { listVoiceStylePacks } = await import('./lib/voice-style-pack-service')
+      return listVoiceStylePacks()
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.UPSERT_STYLE_PACK,
+    async (_, input: VoiceStylePackInput): Promise<VoiceStylePack> => {
+      const { upsertVoiceStylePack } = await import('./lib/voice-style-pack-service')
+      return upsertVoiceStylePack(input)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.DELETE_STYLE_PACK,
+    async (_, id: string): Promise<void> => {
+      const { deleteVoiceStylePack } = await import('./lib/voice-style-pack-service')
+      deleteVoiceStylePack(id)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.LIST_DICTIONARY,
+    async (): Promise<VoiceDictionaryEntry[]> => {
+      const { getVoiceDictationSettings } = await import('./lib/voice-dictation-settings-service')
+      const { listVoiceDictionaryEntries } = await import('./lib/voice-dictionary-service')
+      return listVoiceDictionaryEntries(getVoiceDictationSettings().customHotwords)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.UPSERT_DICTIONARY_ENTRY,
+    async (_, input: VoiceDictionaryEntryInput): Promise<VoiceDictionaryEntry> => {
+      const { upsertVoiceDictionaryEntry } = await import('./lib/voice-dictionary-service')
+      return upsertVoiceDictionaryEntry(input)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.DELETE_DICTIONARY_ENTRY,
+    async (_, id: string): Promise<void> => {
+      const { deleteVoiceDictionaryEntry } = await import('./lib/voice-dictionary-service')
+      deleteVoiceDictionaryEntry(id)
     }
   )
 

@@ -5,6 +5,7 @@
  */
 
 import type { EnvironmentCheckResult, ThinkingConfig, AgentEffort, FeishuSessionMirrorSettings, UsageBudgetConfig } from '@proma/shared'
+import type { VoiceDictationPersistedSettings } from './voice-dictation'
 
 /** 通知音场景类型 */
 export type NotificationSoundType = 'taskComplete' | 'permissionRequest' | 'exitPlanMode'
@@ -20,113 +21,6 @@ export interface NotificationSoundSettings {
   permissionRequest?: NotificationSoundId
   /** 计划审批 */
   exitPlanMode?: NotificationSoundId
-}
-
-/** 语音输入供应商 */
-export type VoiceDictationProvider = 'doubao'
-
-/** 豆包 ASR 连接模式 */
-export type VoiceDictationEndpointMode = 'async' | 'duplex'
-
-/** 语音输入输出方式 */
-export type VoiceDictationOutputMode = 'auto' | 'clipboard' | 'proma-input'
-
-/** 语音输入浮窗位置 */
-export interface VoiceDictationWindowPosition {
-  x: number
-  y: number
-  /** 窗口相对于所在屏幕 workArea 的归一化水平偏移 (0~1) */
-  relativeX?: number
-  /** 窗口相对于所在屏幕 workArea 的归一化垂直偏移 (0~1) */
-  relativeY?: number
-}
-
-/** 语音输入设置（渲染进程读取到的是解密后的值） */
-export interface VoiceDictationSettings {
-  /** 是否启用语音输入 */
-  enabled: boolean
-  /** 语音识别供应商 */
-  provider: VoiceDictationProvider
-  /** 豆包 APP ID，对应 X-Api-App-Key 请求头 */
-  appId: string
-  /** 豆包 Access Token，对应 X-Api-Access-Key 请求头 */
-  accessToken: string
-  /** 豆包 Resource ID */
-  resourceId: string
-  /** 语言，空字符串表示自动 */
-  language: string
-  /** WebSocket 端点模式 */
-  endpointMode: VoiceDictationEndpointMode
-  /** 输出方式 */
-  outputMode: VoiceDictationOutputMode
-  /** 自定义热词，按行或逗号分隔，启动识别时直传给豆包 ASR */
-  customHotwords: string
-  /** 语音输入浮窗上次拖动后的位置 */
-  windowPosition?: VoiceDictationWindowPosition
-}
-
-/** 语音输入设置更新 */
-export type VoiceDictationSettingsUpdate = Partial<VoiceDictationSettings>
-
-/** 落盘配置，保留旧字段用于从 MVP 早期版本平滑迁移 */
-export interface VoiceDictationPersistedSettings extends Partial<VoiceDictationSettings> {
-  /** @deprecated 使用 appId */
-  appKey?: string
-  /** @deprecated 使用 accessToken */
-  accessKey?: string
-}
-
-/** 语音输入转写事件 */
-export interface VoiceDictationTranscriptEvent {
-  sessionId: string
-  text: string
-  isFinal: boolean
-}
-
-/** 语音输入状态事件 */
-export interface VoiceDictationStateEvent {
-  sessionId?: string
-  status: 'idle' | 'connecting' | 'recording' | 'stopping' | 'completed' | 'error'
-  message?: string
-}
-
-/** 开始语音输入会话参数 */
-export interface VoiceDictationStartInput {
-  sessionId: string
-}
-
-/** 语音音频分片 */
-export interface VoiceDictationAudioChunkInput {
-  sessionId: string
-  data: ArrayBuffer
-}
-
-/** 结束语音输入会话参数 */
-export interface VoiceDictationStopInput {
-  sessionId: string
-}
-
-/** 输出语音输入文本参数 */
-export interface VoiceDictationCommitInput {
-  text: string
-}
-
-/** 调整语音输入浮窗尺寸参数 */
-export interface VoiceDictationResizeInput {
-  height: number
-}
-
-/** 输出语音输入文本结果 */
-export interface VoiceDictationCommitResult {
-  mode: 'proma-input' | 'cursor' | 'clipboard'
-  success: boolean
-  message: string
-}
-
-/** 语音输入测试结果 */
-export interface VoiceDictationTestResult {
-  success: boolean
-  message: string
 }
 
 /** 麦克风权限检查结果 */
@@ -348,6 +242,22 @@ export const VOICE_DICTATION_IPC_CHANNELS = {
   CANCEL: 'voice-dictation:cancel',
   /** 输出最终文本 */
   COMMIT: 'voice-dictation:commit',
+  /** LLM 整理最终文本 */
+  POLISH: 'voice-dictation:polish',
+  /** 取消 LLM 整理 */
+  CANCEL_POLISH: 'voice-dictation:cancel-polish',
+  /** 获取语音风格包 */
+  LIST_STYLE_PACKS: 'voice-dictation:list-style-packs',
+  /** 保存语音风格包 */
+  UPSERT_STYLE_PACK: 'voice-dictation:upsert-style-pack',
+  /** 删除语音风格包 */
+  DELETE_STYLE_PACK: 'voice-dictation:delete-style-pack',
+  /** 获取语音词典 */
+  LIST_DICTIONARY: 'voice-dictation:list-dictionary',
+  /** 保存语音词典条目 */
+  UPSERT_DICTIONARY_ENTRY: 'voice-dictation:upsert-dictionary-entry',
+  /** 删除语音词典条目 */
+  DELETE_DICTIONARY_ENTRY: 'voice-dictation:delete-dictionary-entry',
   /** 隐藏语音输入窗口 */
   HIDE: 'voice-dictation:hide',
   /** 调整语音输入窗口高度 */

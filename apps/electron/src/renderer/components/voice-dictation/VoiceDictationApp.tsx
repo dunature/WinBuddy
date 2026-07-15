@@ -20,6 +20,7 @@ export function VoiceDictationApp(): React.ReactElement {
   const [status, setStatus] = React.useState<VoiceDictationStateEvent['status']>('idle')
   const [message, setMessage] = React.useState('按快捷键开始语音输入')
   const [transcript, setTranscript] = React.useState('')
+  const [preview, setPreview] = React.useState<{ rawText: string; polishedText: string } | null>(null)
   const [commitResult, setCommitResult] = React.useState<VoiceDictationCommitResult | null>(null)
   const [volume, setVolume] = React.useState(0)
 
@@ -41,6 +42,7 @@ export function VoiceDictationApp(): React.ReactElement {
   const settingsRef = React.useRef<VoiceDictationSettings | null>(null)
   const commitTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const commitInFlightRef = React.useRef(false)
+  const polishRequestIdRef = React.useRef<string | null>(null)
 
   const {
     rootRef,
@@ -53,7 +55,7 @@ export function VoiceDictationApp(): React.ReactElement {
     commitResultMessage: commitResult?.message ?? null,
     message,
     status,
-    transcript,
+    transcript: preview?.polishedText ?? transcript,
   })
 
   React.useEffect(() => {
@@ -125,26 +127,18 @@ export function VoiceDictationApp(): React.ReactElement {
     }
   }, [sendAudioChunk])
 
-  const commitAndHide = React.useCallback(async () => {
-    if (commitInFlightRef.current) return
+  const commitTextAndHide = React.useCallback(async (finalText: string, force = false) => {
+    if (commitInFlightRef.current && !force) return
     commitInFlightRef.current = true
     if (commitTimerRef.current) {
       clearTimeout(commitTimerRef.current)
       commitTimerRef.current = null
     }
-    const text = transcriptRef.current.trim()
-    if (!text) {
-      setStatus('idle')
-      setMessage('没有识别到语音内容')
-      cleanupAudio()
-      setTimeout(() => window.electronAPI.hideVoiceDictation().catch(console.error), 180)
-      return
-    }
 
     setStatus('stopping')
     setMessage('正在输出文本...')
     try {
-      const result = await window.electronAPI.commitVoiceDictation({ text })
+      const result = await window.electronAPI.commitVoiceDictation({ text: finalText })
       setCommitResult(result)
       setStatus('completed')
       setMessage(result.message)
@@ -157,6 +151,59 @@ export function VoiceDictationApp(): React.ReactElement {
       setMessage(`输出失败: ${textMessage}`)
     }
   }, [cleanupAudio])
+
+  const commitAndHide = React.useCallback(async () => {
+    if (commitInFlightRef.current) return
+    commitInFlightRef.current = true
+    if (commitTimerRef.current) {
+      clearTimeout(commitTimerRef.current)
+      commitTimerRef.current = null
+    }
+    const text = transcriptRef.current.trim()
+    if (!text) {
+      setStatus('idle')
+      setMessage('没有识别到语音内容')
+      cleanupAudio()
+      commitInFlightRef.current = false
+      setTimeout(() => window.electronAPI.hideVoiceDictation().catch(console.error), 180)
+      return
+    }
+
+    const settings = settingsRef.current
+    const shouldPolish = settings?.polish.enabled === true && settings.polish.stylePackId !== 'builtin-raw'
+    if (!shouldPolish) {
+      await commitTextAndHide(text, true)
+      return
+    }
+
+    const requestId = crypto.randomUUID()
+    polishRequestIdRef.current = requestId
+    setStatus('polishing')
+    setMessage('正在整理文本...')
+    try {
+      const result = await window.electronAPI.polishVoiceDictation({ requestId, text })
+      polishRequestIdRef.current = null
+      if (result.usedRaw || !settings?.polish.previewBeforeCommit) {
+        await commitTextAndHide(result.text, true)
+        return
+      }
+      setPreview({ rawText: result.rawText, polishedText: result.text })
+      setStatus('preview')
+      setMessage('确认语音整理结果')
+      cleanupAudio()
+      commitInFlightRef.current = false
+    } catch (error) {
+      polishRequestIdRef.current = null
+      const textMessage = error instanceof Error ? error.message : '未知错误'
+      if (textMessage.includes('已取消')) {
+        cleanupAudio()
+        setTimeout(() => window.electronAPI.hideVoiceDictation().catch(console.error), 120)
+        return
+      }
+      console.warn('[语音输入] 整理失败，提交原文:', error)
+      await commitTextAndHide(text, true)
+    }
+  }, [cleanupAudio, commitTextAndHide])
 
   const scheduleCommit = React.useCallback((delay: number) => {
     if (commitInFlightRef.current) return
@@ -192,6 +239,11 @@ export function VoiceDictationApp(): React.ReactElement {
     }
     window.electronAPI.hideVoiceDictation().catch(console.error)
     cleanupAudio()
+    const polishRequestId = polishRequestIdRef.current
+    if (polishRequestId) {
+      window.electronAPI.cancelVoicePolish({ requestId: polishRequestId }).catch(console.error)
+      polishRequestIdRef.current = null
+    }
     if (currentSessionId) {
       window.electronAPI.cancelVoiceDictation({ sessionId: currentSessionId }).catch(console.error)
     }
@@ -293,6 +345,7 @@ export function VoiceDictationApp(): React.ReactElement {
     queuedAudioRef.current = []
     pendingAudioRef.current = []
     setTranscript('')
+    setPreview(null)
     transcriptRef.current = ''
     transcriptMergeStateRef.current = {
       committedText: '',
@@ -436,11 +489,27 @@ export function VoiceDictationApp(): React.ReactElement {
         window.electronAPI.cancelVoiceDictation({ sessionId: currentSessionId }).catch(console.error)
       }
       if (commitTimerRef.current) clearTimeout(commitTimerRef.current)
+      const polishRequestId = polishRequestIdRef.current
+      if (polishRequestId) {
+        window.electronAPI.cancelVoicePolish({ requestId: polishRequestId }).catch(console.error)
+        polishRequestIdRef.current = null
+      }
       cleanupAudio()
     }
   }, [cleanupAudio, flushQueuedAudio, scheduleCommit, startRecording, stopRecording])
 
-  const busy = status === 'connecting' || status === 'recording' || status === 'stopping'
+  const handleUsePolished = React.useCallback(() => {
+    if (!preview) return
+    commitTextAndHide(preview.polishedText).catch(console.error)
+  }, [commitTextAndHide, preview])
+
+  const handleUseRaw = React.useCallback(() => {
+    if (!preview) return
+    commitTextAndHide(preview.rawText).catch(console.error)
+  }, [commitTextAndHide, preview])
+
+  const busy = status === 'connecting' || status === 'recording' || status === 'stopping' || status === 'polishing'
+  const displayTranscript = preview?.polishedText ?? transcript
   return (
     <div ref={rootRef} className="box-border flex h-screen w-screen flex-col overflow-hidden rounded-xl bg-background px-2 pt-2 pb-1.5">
       <div ref={panelRef} className="flex min-h-0 w-full flex-col overflow-hidden">
@@ -449,7 +518,7 @@ export function VoiceDictationApp(): React.ReactElement {
             <div
               className={`relative flex size-8 items-center justify-center rounded-full ${status === 'error' ? 'bg-destructive/12 text-destructive' : 'bg-primary/12 text-primary'}`}
             >
-              {status === 'connecting' || status === 'stopping'
+              {status === 'connecting' || status === 'stopping' || status === 'polishing'
                 ? <Loader2 className="size-4 animate-spin" />
                 : status === 'completed'
                   ? <Check className="size-4" />
@@ -480,7 +549,10 @@ export function VoiceDictationApp(): React.ReactElement {
                 variant="ghost"
                 size="icon"
                 className="voice-dictation-no-drag size-8 rounded-full text-destructive"
-                onClick={() => stopRecording().catch(console.error)}
+                onClick={() => {
+                  if (status === 'polishing') cancelAndHide()
+                  else stopRecording().catch(console.error)
+                }}
               >
                 <Square className="size-3.5" fill="currentColor" strokeWidth={0} />
               </Button>
@@ -501,9 +573,17 @@ export function VoiceDictationApp(): React.ReactElement {
           <div className="overflow-hidden rounded-lg bg-muted/45">
             <div ref={hintBarRef} className="flex min-h-8 shrink-0 items-center justify-between gap-3 px-3 py-1.5 text-xs leading-4 text-muted-foreground">
               <span className="truncate">
-                Ctrl+～ 停止 · 外部写入光标 · Proma 激活时写入 Chat / Agent
+                {status === 'preview'
+                  ? '预览只读 · 选择整理结果、原文或取消'
+                  : 'Ctrl+～ 停止 · 外部写入光标 · Proma 激活时写入 Chat / Agent'}
               </span>
-              {commitResult && (
+              {status === 'preview' && preview ? (
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <Button size="sm" className="h-7 px-2 text-xs" onClick={handleUsePolished}>使用整理结果</Button>
+                  <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={handleUseRaw}>使用原文</Button>
+                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={cancelAndHide}>取消</Button>
+                </span>
+              ) : commitResult && (
                 <span className="flex shrink-0 items-center gap-1.5">
                   <Clipboard className="size-3.5" />
                   {commitResult.message}
@@ -520,7 +600,7 @@ export function VoiceDictationApp(): React.ReactElement {
               }}
             >
               <div className="whitespace-pre-wrap break-words overflow-hidden">
-                {transcript || (
+                {displayTranscript || (
                   <span className="text-muted-foreground/60">
                     {status === 'idle' ? '等待 Ctrl+～ 唤起' : '请开始说话'}
                   </span>

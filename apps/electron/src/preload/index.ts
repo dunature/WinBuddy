@@ -130,6 +130,13 @@ import type {
   VoiceDictationStopInput,
   VoiceDictationTestResult,
   VoiceDictationTranscriptEvent,
+  VoiceDictionaryEntry,
+  VoiceDictionaryEntryInput,
+  VoicePolishCancelInput,
+  VoicePolishInput,
+  VoicePolishResult,
+  VoiceStylePack,
+  VoiceStylePackInput,
   MicPermissionResult,
   TrayCreateSessionData,
   TrayOpenAgentSessionData,
@@ -987,6 +994,22 @@ export interface ElectronAPI {
   cancelVoiceDictation: (input: VoiceDictationStopInput) => Promise<void>
   /** 输出最终语音文本 */
   commitVoiceDictation: (input: VoiceDictationCommitInput) => Promise<VoiceDictationCommitResult>
+  /** 整理最终语音文本 */
+  polishVoiceDictation: (input: VoicePolishInput) => Promise<VoicePolishResult>
+  /** 取消语音文本整理 */
+  cancelVoicePolish: (input: VoicePolishCancelInput) => Promise<void>
+  /** 获取语音风格包 */
+  listVoiceStylePacks: () => Promise<VoiceStylePack[]>
+  /** 保存语音风格包 */
+  upsertVoiceStylePack: (input: VoiceStylePackInput) => Promise<VoiceStylePack>
+  /** 删除语音风格包 */
+  deleteVoiceStylePack: (id: string) => Promise<void>
+  /** 获取语音词典 */
+  listVoiceDictionaryEntries: () => Promise<VoiceDictionaryEntry[]>
+  /** 保存语音词典条目 */
+  upsertVoiceDictionaryEntry: (input: VoiceDictionaryEntryInput) => Promise<VoiceDictionaryEntry>
+  /** 删除语音词典条目 */
+  deleteVoiceDictionaryEntry: (id: string) => Promise<void>
   /** 隐藏语音输入窗口 */
   hideVoiceDictation: () => Promise<void>
   /** 调整语音输入窗口高度 */
@@ -2293,6 +2316,38 @@ const electronAPI: ElectronAPI = {
 
   commitVoiceDictation: (input: VoiceDictationCommitInput) => {
     return ipcRenderer.invoke(VOICE_DICTATION_IPC_CHANNELS.COMMIT, input)
+  },
+
+  polishVoiceDictation: (input: VoicePolishInput) => {
+    return ipcRenderer.invoke(VOICE_DICTATION_IPC_CHANNELS.POLISH, input)
+  },
+
+  cancelVoicePolish: (input: VoicePolishCancelInput) => {
+    return ipcRenderer.invoke(VOICE_DICTATION_IPC_CHANNELS.CANCEL_POLISH, input)
+  },
+
+  listVoiceStylePacks: () => {
+    return ipcRenderer.invoke(VOICE_DICTATION_IPC_CHANNELS.LIST_STYLE_PACKS)
+  },
+
+  upsertVoiceStylePack: (input: VoiceStylePackInput) => {
+    return ipcRenderer.invoke(VOICE_DICTATION_IPC_CHANNELS.UPSERT_STYLE_PACK, input)
+  },
+
+  deleteVoiceStylePack: (id: string) => {
+    return ipcRenderer.invoke(VOICE_DICTATION_IPC_CHANNELS.DELETE_STYLE_PACK, id)
+  },
+
+  listVoiceDictionaryEntries: () => {
+    return ipcRenderer.invoke(VOICE_DICTATION_IPC_CHANNELS.LIST_DICTIONARY)
+  },
+
+  upsertVoiceDictionaryEntry: (input: VoiceDictionaryEntryInput) => {
+    return ipcRenderer.invoke(VOICE_DICTATION_IPC_CHANNELS.UPSERT_DICTIONARY_ENTRY, input)
+  },
+
+  deleteVoiceDictionaryEntry: (id: string) => {
+    return ipcRenderer.invoke(VOICE_DICTATION_IPC_CHANNELS.DELETE_DICTIONARY_ENTRY, id)
   },
 
   hideVoiceDictation: () => {

@@ -15,6 +15,7 @@ import type {
   VoiceDictationStateEvent,
 } from '../../types'
 import { VOICE_DICTATION_IPC_CHANNELS } from '../../types'
+import { getVoiceAsrHotwords } from './voice-dictionary-service'
 
 const PROTOCOL_VERSION = 0b0001
 const HEADER_SIZE = 0b0001
@@ -39,8 +40,6 @@ const ASYNC_ENDPOINT = 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_asyn
 const DUPLEX_ENDPOINT = 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel'
 const DICTATION_END_WINDOW_SIZE_MS = 5000
 const DICTATION_FORCE_TO_SPEECH_TIME_MS = 1000
-const MAX_INLINE_HOTWORDS = 100
-const HOTWORD_SEPARATOR_PATTERN = /[\n,，、;；]+/u
 
 interface ServerUtterance {
   text?: string
@@ -86,23 +85,9 @@ function getEndpoint(settings: VoiceDictationSettings): string {
   return settings.endpointMode === 'duplex' ? DUPLEX_ENDPOINT : ASYNC_ENDPOINT
 }
 
-function parseCustomHotwords(value: string): DoubaoAsrHotword[] {
-  const seen = new Set<string>()
-  const hotwords: DoubaoAsrHotword[] = []
-
-  for (const rawWord of value.split(HOTWORD_SEPARATOR_PATTERN)) {
-    const word = rawWord.trim()
-    if (!word || seen.has(word)) continue
-    seen.add(word)
-    hotwords.push({ word })
-    if (hotwords.length >= MAX_INLINE_HOTWORDS) break
-  }
-
-  return hotwords
-}
-
 function buildCorpus(settings: VoiceDictationSettings): DoubaoAsrCorpus | undefined {
-  const hotwords = parseCustomHotwords(settings.customHotwords)
+  const hotwords: DoubaoAsrHotword[] = getVoiceAsrHotwords(settings.customHotwords)
+    .map((word) => ({ word }))
   if (hotwords.length === 0) return undefined
 
   return {
