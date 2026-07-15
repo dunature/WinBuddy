@@ -31,6 +31,11 @@ const ENDPOINT_OPTIONS = [
   { value: 'duplex', label: '双向流式标准版' },
 ]
 
+const CONNECTION_MODE_OPTIONS = [
+  { value: 'standard', label: '豆包流式语音识别' },
+  { value: 'ark-agent-plan', label: '火山方舟 Agent Plan 语音大模型' },
+]
+
 const OUTPUT_OPTIONS = [
   { value: 'auto', label: '自动：Proma 激活时写入对话框，否则写入当前光标' },
   { value: 'clipboard', label: '仅复制到剪贴板' },
@@ -293,6 +298,11 @@ export function VoiceInputSettings(): React.ReactElement {
   const selectedStyle = stylePacks.find((pack) => pack.id === selectedStyleId) ?? stylePacks[0]
   const styleOptions = stylePacks.map((pack) => ({ value: pack.id, label: pack.name }))
   const enabledDictionaryCount = dictionaryEntries.filter((entry) => entry.enabled).length
+  const isAgentPlan = settings.connectionMode === 'ark-agent-plan'
+  const testDisabled = testing
+    || !settings.resourceId
+    || !settings.accessToken
+    || (!isAgentPlan && !settings.appId)
 
   return (
     <div className="space-y-6">
@@ -304,7 +314,7 @@ export function VoiceInputSettings(): React.ReactElement {
             variant="outline"
             size="sm"
             onClick={handleTest}
-            disabled={testing || !settings.appId || !settings.accessToken || !settings.resourceId}
+            disabled={testDisabled}
           >
             {testing ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <TestTube2 className="mr-1.5 size-3.5" />}
             测试连接
@@ -372,33 +382,45 @@ export function VoiceInputSettings(): React.ReactElement {
             checked={settings.enabled}
             onCheckedChange={(enabled) => update({ enabled })}
           />
+          <SettingsSelect
+            label="连接方案"
+            description="Agent Plan 使用火山方舟语音大模型 API Key；普通方案保留现有 APP ID 和 Access Token。"
+            value={settings.connectionMode}
+            onValueChange={(connectionMode) => update({
+              connectionMode: connectionMode as VoiceDictationSettings['connectionMode'],
+              endpointMode: connectionMode === 'ark-agent-plan' ? 'async' : settings.endpointMode,
+            })}
+            options={CONNECTION_MODE_OPTIONS}
+          />
           <SettingsInput
             label="豆包 APP ID"
-            description="对应 X-Api-App-Key，请填写火山引擎控制台中的 APP ID。"
+            description="普通豆包 ASR 需要，对应 X-Api-App-Key；Agent Plan 不需要填写。"
             value={settings.appId}
             onChange={(appId) => update({ appId })}
             placeholder="请输入 APP ID"
+            disabled={isAgentPlan}
           />
           <SettingsSecretInput
-            label="豆包 Access Token"
-            description="对应 X-Api-Access-Key，保存时会加密。"
+            label={isAgentPlan ? 'Agent Plan API Key' : '豆包 Access Token'}
+            description={isAgentPlan ? '对应 X-Api-Key，保存时会加密。' : '对应 X-Api-Access-Key，保存时会加密。'}
             value={settings.accessToken}
             onChange={(accessToken) => update({ accessToken })}
-            placeholder="请输入 Access Token"
+            placeholder={isAgentPlan ? '请输入 Agent Plan API Key' : '请输入 Access Token'}
           />
           <SettingsInput
             label="Resource ID"
-            description="默认使用豆包语音识别模型 2.0 小时版。"
+            description="默认使用火山语音大模型小时版资源 ID。"
             value={settings.resourceId}
             onChange={(resourceId) => update({ resourceId })}
             placeholder="volc.seedasr.sauc.duration"
           />
           <SettingsSelect
             label="连接模式"
-            description="优化版只在结果变化时返回新包，实时体验更好。"
+            description={isAgentPlan ? 'Agent Plan 当前使用异步优化版端点。' : '优化版只在结果变化时返回新包，实时体验更好。'}
             value={settings.endpointMode}
             onValueChange={(endpointMode) => update({ endpointMode: endpointMode as VoiceDictationSettings['endpointMode'] })}
             options={ENDPOINT_OPTIONS}
+            disabled={isAgentPlan}
           />
           <SettingsSelect
             label="识别语言"

@@ -7,6 +7,9 @@
 /** 语音输入供应商 */
 export type VoiceDictationProvider = 'doubao'
 
+/** 豆包语音连接方案 */
+export type VoiceDictationConnectionMode = 'standard' | 'ark-agent-plan'
+
 /** 豆包 ASR 连接模式 */
 export type VoiceDictationEndpointMode = 'async' | 'duplex'
 
@@ -46,9 +49,11 @@ export interface VoiceDictationSettings {
   enabled: boolean
   /** 语音识别供应商 */
   provider: VoiceDictationProvider
+  /** 连接方案：普通豆包 ASR 或火山方舟 Agent Plan */
+  connectionMode: VoiceDictationConnectionMode
   /** 豆包 APP ID，对应 X-Api-App-Key 请求头 */
   appId: string
-  /** 豆包 Access Token，对应 X-Api-Access-Key 请求头 */
+  /** 普通模式为 Access Token；Agent Plan 模式为 API Key */
   accessToken: string
   /** 豆包 Resource ID */
   resourceId: string

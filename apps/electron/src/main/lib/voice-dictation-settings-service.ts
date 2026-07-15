@@ -12,6 +12,7 @@ import { DEFAULT_STYLE_PACK_ID } from './voice-style-pack-builtins'
 const DEFAULT_VOICE_DICTATION_SETTINGS: VoiceDictationSettings = {
   enabled: false,
   provider: 'doubao',
+  connectionMode: 'standard',
   appId: '',
   accessToken: '',
   resourceId: 'volc.seedasr.sauc.duration',
@@ -55,6 +56,7 @@ export function getVoiceDictationSettings(): VoiceDictationSettings {
     ...DEFAULT_VOICE_DICTATION_SETTINGS,
     ...raw,
     appId: raw.appId ?? raw.appKey ?? '',
+    connectionMode: raw.connectionMode ?? 'standard',
     accessToken: decryptSecret(encryptedAccessToken),
     customHotwords: typeof raw.customHotwords === 'string' ? raw.customHotwords : '',
     polish: {
@@ -80,6 +82,7 @@ export function updateVoiceDictationSettings(
       ...(updates.polish ?? {}),
     },
     provider: 'doubao',
+    connectionMode: updates.connectionMode ?? current.connectionMode ?? 'standard',
   }
 
   updateSettings({
