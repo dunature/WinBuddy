@@ -133,6 +133,10 @@ import type {
   MarketplaceStartInstallInput,
   MarketplaceCancelInstallInput,
   MarketplaceResolveConflictInput,
+  MarketplaceInstalledSourceInput,
+  MarketplaceCheckUpdatesInput,
+  MarketplaceSkillSource,
+  MarketplaceAvailableUpdate,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
@@ -140,6 +144,7 @@ import { getUnstagedChanges, getFileDiff, getUntrackedContent, revertFile, getDi
 import { registerPromaFilePath } from './lib/local-file-protocol'
 import { registerUpdaterIpc } from './lib/updater/updater-ipc'
 import { cancelMarketplaceInstall, createMarketplaceInstall, resolveMarketplaceInstallConflict, startMarketplaceInstall } from './lib/marketplace-installer'
+import { checkMarketplaceUpdates, getInstalledMarketplaceSource } from './lib/marketplace-updates'
 import {
   listChannels,
   createChannel,
@@ -1792,7 +1797,7 @@ export function registerIpcHandlers(): void {
       await startMarketplaceInstall(input.installId, (state) => {
         event.sender.send(MARKETPLACE_IPC_CHANNELS.INSTALL_PROGRESS, state)
         if (state.status === 'success') event.sender.send(AGENT_IPC_CHANNELS.CAPABILITIES_CHANGED)
-      })
+      }, app.getVersion())
     },
   )
 
@@ -1807,6 +1812,16 @@ export function registerIpcHandlers(): void {
       event.sender.send(MARKETPLACE_IPC_CHANNELS.INSTALL_PROGRESS, state)
       if (state.status === 'success') event.sender.send(AGENT_IPC_CHANNELS.CAPABILITIES_CHANGED)
     }),
+  )
+
+  ipcMain.handle(
+    MARKETPLACE_IPC_CHANNELS.GET_INSTALLED_SOURCE,
+    async (_event, input: MarketplaceInstalledSourceInput): Promise<MarketplaceSkillSource | undefined> => getInstalledMarketplaceSource(input.workspaceSlug, input.skillSlug),
+  )
+
+  ipcMain.handle(
+    MARKETPLACE_IPC_CHANNELS.CHECK_UPDATES,
+    async (_event, input: MarketplaceCheckUpdatesInput): Promise<MarketplaceAvailableUpdate[]> => checkMarketplaceUpdates(input.workspaceSlug),
   )
 
   // ===== 代理配置相关 =====

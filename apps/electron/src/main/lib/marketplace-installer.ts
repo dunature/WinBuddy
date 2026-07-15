@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import yauzl, { type Entry, type ZipFile } from 'yauzl'
 import { parseSkillManifest, validateMarketplacePackageEntries, type MarketplacePackageEntry } from '@proma/marketplace-domain'
-import type { MarketplaceCreateInstallInput, MarketplaceCreateInstallResult, MarketplaceInstallError, MarketplaceInstallState, MarketplacePackageDownload, MarketplaceResolveConflictInput, MarketplaceSkillSource } from '@proma/shared'
+import type { MarketplaceCreateInstallInput, MarketplaceCreateInstallResult, MarketplaceInstallError, MarketplaceInstallEventInput, MarketplaceInstallState, MarketplacePackageDownload, MarketplacePermissionSet, MarketplaceResolveConflictInput, MarketplaceSkillSource } from '@proma/shared'
 import { getAgentWorkspacePath, getMarketplaceInstallsTempDir, getWorkspaceSkillsDir } from './config-paths'
 import { listAgentWorkspaces } from './agent-workspace-manager'
 import { getSettings } from './settings-service'
@@ -28,6 +28,8 @@ export interface MarketplaceInstallerSession {
   expectedSha256: string
   controller: AbortController
   active: boolean
+  permissions?: MarketplacePermissionSet
+  appVersion: string
 }
 
 type ProgressCallback = (state: MarketplaceInstallState) => void
@@ -52,13 +54,15 @@ export function createMarketplaceInstall(input: MarketplaceCreateInstallInput): 
     controller: new AbortController(),
     active: false,
     expectedSha256: '',
+    appVersion: '0.0.0',
   }
   sessions.set(installId, session)
   return { installId, skillId: input.skillId, slug: input.slug, version: input.version, workspaceSlug: input.workspaceSlug }
 }
 
-export async function startMarketplaceInstall(installId: string, onProgress: ProgressCallback): Promise<void> {
+export async function startMarketplaceInstall(installId: string, onProgress: ProgressCallback, appVersion = '0.0.0'): Promise<void> {
   const session = requireSession(installId)
+  session.appVersion = appVersion
   session.active = true
   try {
     const metadata = await fetchPackageMetadata(session)
@@ -71,6 +75,7 @@ export async function startMarketplaceInstall(installId: string, onProgress: Pro
     onProgress({ status: 'verifying', installId, step: 'manifest' })
     const manifest = parseSkillManifest(readFileSync(join(session.stagingDir, 'SKILL.md'), 'utf8'))
     if (!manifest.manifest || manifest.issues.some((issue) => issue.severity === 'error')) throw installerError('PACKAGE_INVALID', 'SKILL.md Manifest 校验失败')
+    session.permissions = manifest.manifest.permissions
     session.active = false
     const targetDir = join(getWorkspaceSkillsDir(session.workspaceSlug), session.slug)
     const conflict = detectMarketplaceInstallConflict({ slug: session.slug, marketplaceSkillId: session.skillId, marketplaceVersion: session.version, marketplaceSha256: session.expectedSha256, targetDir })
@@ -251,6 +256,7 @@ function commitMarketplaceInstall(session: MarketplaceInstallerSession, onProgre
       sha256: session.expectedSha256,
       installedAt: new Date().toISOString(),
       files: collectMarketplaceFileHashes(session.stagingDir),
+      permissions: session.permissions,
     }
     writeFileSync(join(session.stagingDir, '.proma-source.json'), JSON.stringify(source, null, 2), { encoding: 'utf8', mode: 0o600 })
     if (existsSync(targetDir)) {
@@ -260,6 +266,7 @@ function commitMarketplaceInstall(session: MarketplaceInstallerSession, onProgre
     }
     renameWithRetry(session.stagingDir, targetDir)
     onProgress(successState(session))
+    void reportMarketplaceInstall(session, source.installedAt)
     cleanupSession(session)
   } catch (error) {
     if (backupCreated && !existsSync(targetDir) && existsSync(backupDir)) {
@@ -271,6 +278,24 @@ function commitMarketplaceInstall(session: MarketplaceInstallerSession, onProgre
 
 function successState(session: MarketplaceInstallerSession): MarketplaceInstallState {
   return { status: 'success', installId: session.installId, slug: session.slug, version: session.version, workspaceSlug: session.workspaceSlug }
+}
+
+async function reportMarketplaceInstall(session: MarketplaceInstallerSession, installedAt: string): Promise<void> {
+  try {
+    const baseUrl = (getSettings().marketplaceApiUrl || DEFAULT_API_URL).replace(/\/$/, '')
+    const event: MarketplaceInstallEventInput = {
+      eventId: session.installId,
+      skillId: session.skillId,
+      version: session.version,
+      installedAt,
+      platform: process.platform === 'darwin' || process.platform === 'win32' ? process.platform : 'linux',
+      appVersion: session.appVersion,
+    }
+    const response = await fetch(`${baseUrl}/install-events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(event), signal: AbortSignal.timeout(10_000) })
+    if (!response.ok) console.warn(`[社区市场] 安装统计上报失败（HTTP ${response.status}）`)
+  } catch (error) {
+    console.warn('[社区市场] 安装统计上报失败，不影响本地安装:', error)
+  }
 }
 
 function cleanupSession(session: MarketplaceInstallerSession): void {

@@ -14,6 +14,8 @@ export interface MarketplaceSkillSource {
   installedAt: string
   /** 安装时文件摘要，用于判断用户是否在本地修改；不包含来源文件自身 */
   files?: Record<string, string>
+  /** 上次确认的权限，用于更新时识别新增权限 */
+  permissions?: MarketplacePermissionSet
 }
 
 export interface MarketplaceCreateInstallInput {

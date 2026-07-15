@@ -122,6 +122,10 @@ import type {
   MarketplaceCancelInstallInput,
   MarketplaceResolveConflictInput,
   MarketplaceInstallState,
+  MarketplaceInstalledSourceInput,
+  MarketplaceCheckUpdatesInput,
+  MarketplaceSkillSource,
+  MarketplaceAvailableUpdate,
 } from '@proma/shared'
 import type {
   UserProfile,
@@ -425,6 +429,8 @@ export interface ElectronAPI {
   cancelMarketplaceInstall: (input: MarketplaceCancelInstallInput) => Promise<boolean>
   resolveMarketplaceInstallConflict: (input: MarketplaceResolveConflictInput) => Promise<boolean>
   onMarketplaceInstallProgress: (callback: (state: MarketplaceInstallState) => void) => () => void
+  getInstalledMarketplaceSource: (input: MarketplaceInstalledSourceInput) => Promise<MarketplaceSkillSource | undefined>
+  checkMarketplaceUpdates: (input: MarketplaceCheckUpdatesInput) => Promise<MarketplaceAvailableUpdate[]>
 
   // ===== 代理配置相关 =====
 
@@ -1478,6 +1484,8 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.on(MARKETPLACE_IPC_CHANNELS.INSTALL_PROGRESS, listener)
     return () => ipcRenderer.off(MARKETPLACE_IPC_CHANNELS.INSTALL_PROGRESS, listener)
   },
+  getInstalledMarketplaceSource: (input: MarketplaceInstalledSourceInput) => ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.GET_INSTALLED_SOURCE, input),
+  checkMarketplaceUpdates: (input: MarketplaceCheckUpdatesInput) => ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.CHECK_UPDATES, input),
 
   // 代理配置
   getProxySettings: () => {

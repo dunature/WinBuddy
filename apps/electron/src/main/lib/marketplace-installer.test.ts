@@ -13,6 +13,7 @@ const zipPath = join(home, 'skill.zip')
 let advertisedHash = ''
 let validHash = ''
 let server: ReturnType<typeof Bun.serve>
+const installEvents: Array<Record<string, unknown>> = []
 
 beforeAll(() => {
   process.env.HOME = home
@@ -46,8 +47,12 @@ permissions:
   writeFileSync(join(configDir, 'agent-workspaces.json'), JSON.stringify({ version: 2, workspaces: [{ id: 'w1', name: 'Test', slug: 'test-workspace', createdAt: 1, updatedAt: 1 }] }))
   server = Bun.serve({
     port: 0,
-    fetch(request) {
+    async fetch(request) {
       const url = new URL(request.url)
+      if (url.pathname === '/install-events' && request.method === 'POST') {
+        installEvents.push(await request.json() as Record<string, unknown>)
+        return new Response(null, { status: 202 })
+      }
       if (url.pathname === '/package.zip') return new Response(Bun.file(zipPath), { headers: { 'content-length': String(Bun.file(zipPath).size) } })
       return Response.json({ skillId: 'skill-1', slug: 'research', version: '1.0.0', sha256: advertisedHash, size: Bun.file(zipPath).size, downloadUrl: `${url.origin}/package.zip`, expiresAt: new Date(Date.now() + 60_000).toISOString() })
     },
@@ -71,6 +76,8 @@ describe('Marketplace 安装下载与 staging', () => {
     expect(existsSync(join(target, 'SKILL.md'))).toBe(true)
     expect(JSON.parse(readFileSync(join(target, '.proma-source.json'), 'utf8')).sha256).toBe(validHash)
     expect(states.at(-1)?.status).toBe('success')
+    await Bun.sleep(10)
+    expect(Object.keys(installEvents[0] ?? {}).sort()).toEqual(['appVersion', 'eventId', 'installedAt', 'platform', 'skillId', 'version'])
   })
 
   test('本地修改进入冲突，明确确认后备份并整体替换', async () => {

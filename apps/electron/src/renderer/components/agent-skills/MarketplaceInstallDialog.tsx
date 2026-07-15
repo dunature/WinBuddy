@@ -3,7 +3,7 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { AlertTriangle, Check, CheckCircle2, Download, Loader2, ShieldCheck, XCircle } from 'lucide-react'
 import type { MarketplaceInstallState, MarketplaceSkillDetail } from '@proma/shared'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { marketplaceActiveInstallIdAtom, marketplaceInstallStatesAtom, marketplacePendingInstallSlugAtom } from '@/atoms/marketplace'
+import { marketplaceActiveInstallIdAtom, marketplaceAvailableUpdatesAtom, marketplaceInstallStatesAtom, marketplacePendingInstallSlugAtom } from '@/atoms/marketplace'
 import { ElectronMarketplaceApi } from '@/lib/marketplace-api'
 import { cn } from '@/lib/utils'
 
@@ -11,10 +11,12 @@ export function MarketplaceInstallDialog({ api, workspaceSlug }: { api: Electron
   const [pendingSlug, setPendingSlug] = useAtom(marketplacePendingInstallSlugAtom)
   const [activeId, setActiveId] = useAtom(marketplaceActiveInstallIdAtom)
   const states = useAtomValue(marketplaceInstallStatesAtom)
+  const availableUpdates = useAtomValue(marketplaceAvailableUpdatesAtom)
   const setStates = useSetAtom(marketplaceInstallStatesAtom)
   const [detail, setDetail] = React.useState<MarketplaceSkillDetail | null>(null)
   const [createError, setCreateError] = React.useState<string | null>(null)
   const state = activeId ? states.get(activeId) : undefined
+  const update = pendingSlug ? availableUpdates.find((item) => item.slug === pendingSlug) : undefined
   const open = Boolean(pendingSlug || activeId)
 
   React.useEffect(() => {
@@ -53,7 +55,7 @@ export function MarketplaceInstallDialog({ api, workspaceSlug }: { api: Electron
     if (activeId) void window.electronAPI.resolveMarketplaceInstallConflict({ installId: activeId, resolution })
   }
 
-  return <Dialog open={open} onOpenChange={(next) => { if (!next) close() }}><DialogContent className="sm:max-w-xl" hideClose={Boolean(state && !isTerminal(state))}>{state ? <InstallStateContent state={state} onCancel={cancel} onResolve={resolve} onClose={close} /> : <><DialogHeader><DialogTitle>安装到当前工作区</DialogTitle><DialogDescription>安装前请确认版本、权限与目标工作区。Proma 会先在临时目录完成安全检查。</DialogDescription></DialogHeader>{detail ? <div className="rounded-xl bg-muted/60 p-4"><div className="flex items-start justify-between gap-4"><div><p className="font-medium">{detail.displayName}</p><p className="mt-1 text-xs text-muted-foreground">{detail.slug} · v{detail.version}</p></div><span className="rounded-full bg-orange-500/10 px-2 py-1 text-[10px] text-orange-700">{detail.author.official ? '官方' : '社区'}</span></div><div className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2"><p>工作区：{workspaceSlug}</p><p>网络：{detail.currentVersion.permissions.network ? '需要' : '不需要'}</p><p>读取文件：{detail.currentVersion.permissions.filesystem.read ? '需要' : '不需要'}</p><p>写入：{detail.currentVersion.permissions.filesystem.write}</p><p>Shell：{detail.currentVersion.permissions.shell ? '需要' : '不需要'}</p><p>包大小：{formatBytes(detail.currentVersion.packageSize)}</p></div></div> : <div className="grid min-h-32 place-items-center"><Loader2 className="animate-spin text-muted-foreground" /></div>}{createError && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">{createError}</p>}<DialogFooter><button type="button" onClick={close} className="rounded-lg border border-border px-4 py-2 text-sm">取消</button><button type="button" onClick={() => void start()} disabled={!detail} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">确认安装</button></DialogFooter></>}</DialogContent></Dialog>
+  return <Dialog open={open} onOpenChange={(next) => { if (!next) close() }}><DialogContent className="sm:max-w-xl" hideClose={Boolean(state && !isTerminal(state))}>{state ? <InstallStateContent state={state} onCancel={cancel} onResolve={resolve} onClose={close} /> : <><DialogHeader><DialogTitle>{update ? '确认更新 Skill' : '安装到当前工作区'}</DialogTitle><DialogDescription>安装前请确认版本、权限与目标工作区。Proma 会先在临时目录完成安全检查。</DialogDescription></DialogHeader>{detail ? <div className="rounded-xl bg-muted/60 p-4"><div className="flex items-start justify-between gap-4"><div><p className="font-medium">{detail.displayName}</p><p className="mt-1 text-xs text-muted-foreground">{detail.slug} · v{detail.version}</p></div><span className="rounded-full bg-orange-500/10 px-2 py-1 text-[10px] text-orange-700">{detail.author.official ? '官方' : '社区'}</span></div><div className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2"><p>工作区：{workspaceSlug}</p><p>网络：{detail.currentVersion.permissions.network ? '需要' : '不需要'}</p><p>读取文件：{detail.currentVersion.permissions.filesystem.read ? '需要' : '不需要'}</p><p>写入：{detail.currentVersion.permissions.filesystem.write}</p><p>Shell：{detail.currentVersion.permissions.shell ? '需要' : '不需要'}</p><p>包大小：{formatBytes(detail.currentVersion.packageSize)}</p></div></div> : <div className="grid min-h-32 place-items-center"><Loader2 className="animate-spin text-muted-foreground" /></div>}{update && update.permissionsAdded.length > 0 && <div className="rounded-xl bg-amber-500/10 p-3 text-xs text-amber-800"><p className="font-medium">此更新新增权限，需要重新确认</p><p className="mt-1">{update.permissionsAdded.map(permissionLabel).join('、')}</p></div>}{createError && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">{createError}</p>}<DialogFooter><button type="button" onClick={close} className="rounded-lg border border-border px-4 py-2 text-sm">取消</button><button type="button" onClick={() => void start()} disabled={!detail} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">{update ? '确认权限并更新' : '确认安装'}</button></DialogFooter></>}</DialogContent></Dialog>
 }
 
 function InstallStateContent({ state, onCancel, onResolve, onClose }: { state: MarketplaceInstallState; onCancel: () => void; onResolve: (resolution: 'cancel' | 'backup-and-replace') => void; onClose: () => void }): React.ReactElement {
@@ -82,4 +84,5 @@ function stepIndex(state: Exclude<MarketplaceInstallState, { status: 'conflict' 
 
 function isTerminal(state: MarketplaceInstallState): boolean { return state.status === 'success' || state.status === 'error' || state.status === 'cancelled' }
 function conflictLabel(kind: 'unmanaged' | 'locally-modified' | 'downgrade' | 'different-source'): string { return ({ unmanaged: '同名 Skill 无来源信息', 'locally-modified': '本地文件已修改', downgrade: '目标版本低于本地版本', 'different-source': '同名 Skill 来自其他来源' })[kind] }
+function permissionLabel(permission: 'network' | 'filesystem' | 'shell' | 'filesystem.write'): string { return ({ network: '网络访问', filesystem: '读取工作区文件', shell: 'Shell', 'filesystem.write': '扩大文件写入范围' })[permission] }
 function formatBytes(value: number): string { return value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KB` : `${(value / 1024 / 1024).toFixed(1)} MB` }
