@@ -31,11 +31,6 @@ const ENDPOINT_OPTIONS = [
   { value: 'duplex', label: '双向流式标准版' },
 ]
 
-const CONNECTION_MODE_OPTIONS = [
-  { value: 'standard', label: '豆包流式语音识别' },
-  { value: 'ark-agent-plan', label: '火山方舟 Agent Plan 语音大模型' },
-]
-
 const OUTPUT_OPTIONS = [
   { value: 'auto', label: '自动：Proma 激活时写入对话框，否则写入当前光标' },
   { value: 'clipboard', label: '仅复制到剪贴板' },
@@ -382,16 +377,29 @@ export function VoiceInputSettings(): React.ReactElement {
             checked={settings.enabled}
             onCheckedChange={(enabled) => update({ enabled })}
           />
-          <SettingsSelect
+          <SettingsRow
             label="连接方案"
             description="Agent Plan 使用火山方舟语音大模型 API Key；普通方案保留现有 APP ID 和 Access Token。"
-            value={settings.connectionMode}
-            onValueChange={(connectionMode) => update({
-              connectionMode: connectionMode as VoiceDictationSettings['connectionMode'],
-              endpointMode: connectionMode === 'ark-agent-plan' ? 'async' : settings.endpointMode,
-            })}
-            options={CONNECTION_MODE_OPTIONS}
-          />
+          >
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={!isAgentPlan ? 'default' : 'outline'}
+                onClick={() => update({ connectionMode: 'standard' })}
+              >
+                普通豆包
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={isAgentPlan ? 'default' : 'outline'}
+                onClick={() => update({ connectionMode: 'ark-agent-plan', endpointMode: 'async' })}
+              >
+                Agent Plan
+              </Button>
+            </div>
+          </SettingsRow>
           <SettingsInput
             label="豆包 APP ID"
             description="普通豆包 ASR 需要，对应 X-Api-App-Key；Agent Plan 不需要填写。"
