@@ -2875,13 +2875,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     'file:resolve-and-read',
     async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<{ resolvedPath: string; content: string } | null> => {
-      const { resolveAndReadFile, resolveFilePath } = await import('./lib/file-preview-service')
+      const { resolveAndReadFile } = await import('./lib/file-preview-service')
+      const { resolveAuthorizedPreviewFile } = await import('./lib/file-preview/preview-access')
       const options = normalizeFileAccessOptions(access)
-      const resolved = resolveFilePath(filePath, getPreviewCandidateBasePaths(options))
-      if (!resolved) {
-        return null
-      }
-      const result = resolveAndReadFile(resolved)
+      const authorized = await resolveAuthorizedPreviewFile(filePath, options)
+      if (!authorized) return null
+      const result = resolveAndReadFile(authorized.resolvedPath)
       return result
     }
   )
@@ -2909,14 +2908,14 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     'file:resolve-path',
     async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<ResolvedFileUrl | null> => {
-      const { resolveFilePath } = await import('./lib/file-preview-service')
+      const { resolveAuthorizedPreviewFile } = await import('./lib/file-preview/preview-access')
       const options = normalizeFileAccessOptions(access)
-      const result = resolveFilePath(filePath, getPreviewCandidateBasePaths(options))
+      const result = await resolveAuthorizedPreviewFile(filePath, options)
       if (!result) return null
       // registerPromaFilePath 对目录路径会抛「不是文件」。渲染端（如悬浮预览解析 markdown
       // 链接）可能传入目录路径，此处优雅降级为 null，而不是让异常冒泡成未捕获的 handler 错误。
       try {
-        return { url: registerPromaFilePath(result) }
+        return { url: registerPromaFilePath(result.resolvedPath) }
       } catch (err) {
         console.warn('[IPC] file:resolve-path 无法注册为文件，跳过:', result, err instanceof Error ? err.message : err)
         return null
@@ -2927,15 +2926,40 @@ export function registerIpcHandlers(): void {
   // 为内联 PDF 预览生成临时 HTML 文件，返回文件路径
   ipcMain.handle(
     'file:prepare-pdf-preview',
-    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<{ tmpHtmlUrl: string } | null> => {
-      const { preparePdfPreview, resolveFilePath } = await import('./lib/file-preview-service')
+    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<import('@proma/shared').PdfPreviewResult | null> => {
+      const { preparePdfPreview } = await import('./lib/file-preview-service')
+      const { resolveAuthorizedPreviewFile } = await import('./lib/file-preview/preview-access')
       const options = normalizeFileAccessOptions(access)
-      const resolved = resolveFilePath(filePath, getPreviewCandidateBasePaths(options))
-      if (!resolved) {
-        return null
-      }
-      const result = await preparePdfPreview(resolved)
-      return result ? { tmpHtmlUrl: result.tmpHtmlUrl } : null
+      const authorized = await resolveAuthorizedPreviewFile(filePath, options)
+      if (!authorized) return null
+      return preparePdfPreview(authorized.resolvedPath)
+    }
+  )
+
+  ipcMain.handle(
+    'file:prepare-markup-preview',
+    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<import('@proma/shared').MarkupPreviewResult | null> => {
+      const { prepareMarkupPreview } = await import('./lib/file-preview-service')
+      const { resolveAuthorizedPreviewFile } = await import('./lib/file-preview/preview-access')
+      const options = normalizeFileAccessOptions(access)
+      const authorized = await resolveAuthorizedPreviewFile(filePath, options)
+      if (!authorized) return null
+      return prepareMarkupPreview(authorized.resolvedPath)
+    }
+  )
+
+  ipcMain.handle(
+    'file:spreadsheet-preview',
+    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<import('@proma/shared').SpreadsheetPreviewResult | null> => {
+      const { convertDelimitedToSpreadsheetPreview, convertOfficeToHtml } = await import('./lib/file-preview-service')
+      const { resolveAuthorizedPreviewFile } = await import('./lib/file-preview/preview-access')
+      const options = normalizeFileAccessOptions(access)
+      const authorized = await resolveAuthorizedPreviewFile(filePath, options)
+      if (!authorized) return null
+      const ext = authorized.resolvedPath.slice(authorized.resolvedPath.lastIndexOf('.')).toLowerCase()
+      if (ext === '.csv' || ext === '.tsv') return convertDelimitedToSpreadsheetPreview(authorized.resolvedPath)
+      const office = await convertOfficeToHtml(authorized.resolvedPath)
+      return office?.spreadsheet ?? null
     }
   )
 
@@ -2943,13 +2967,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     'file:docx-to-html',
     async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<{ resolvedPath: string; html: string } | null> => {
-      const { convertDocxToHtml, resolveFilePath } = await import('./lib/file-preview-service')
+      const { convertDocxToHtml } = await import('./lib/file-preview-service')
+      const { resolveAuthorizedPreviewFile } = await import('./lib/file-preview/preview-access')
       const options = normalizeFileAccessOptions(access)
-      const resolved = resolveFilePath(filePath, getPreviewCandidateBasePaths(options))
-      if (!resolved) {
-        return null
-      }
-      const result = await convertDocxToHtml(resolved)
+      const authorized = await resolveAuthorizedPreviewFile(filePath, options)
+      if (!authorized) return null
+      const result = await convertDocxToHtml(authorized.resolvedPath)
       return result
     }
   )
@@ -2958,13 +2981,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     'file:office-to-html',
     async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<import('@proma/shared').OfficePreviewResult | null> => {
-      const { convertOfficeToHtml, resolveFilePath } = await import('./lib/file-preview-service')
+      const { convertOfficeToHtml } = await import('./lib/file-preview-service')
+      const { resolveAuthorizedPreviewFile } = await import('./lib/file-preview/preview-access')
       const options = normalizeFileAccessOptions(access)
-      const resolved = resolveFilePath(filePath, getPreviewCandidateBasePaths(options))
-      if (!resolved) {
-        return null
-      }
-      return convertOfficeToHtml(resolved)
+      const authorized = await resolveAuthorizedPreviewFile(filePath, options)
+      if (!authorized) return null
+      return convertOfficeToHtml(authorized.resolvedPath)
     }
   )
 
@@ -2973,13 +2995,13 @@ export function registerIpcHandlers(): void {
     'file:read-binary-base64',
     async (_, filePath: string, access?: FileAccessOptions | string[], maxSize?: number): Promise<string | null> => {
       const { readFileSync, statSync } = await import('node:fs')
-      const { resolveFilePath } = await import('./lib/file-preview-service')
+      const { resolveAuthorizedPreviewFile } = await import('./lib/file-preview/preview-access')
       const options = normalizeFileAccessOptions(access)
-      const resolved = resolveFilePath(filePath, getPreviewCandidateBasePaths(options))
-      if (!resolved) return null
-      const st = statSync(resolved)
+      const authorized = await resolveAuthorizedPreviewFile(filePath, options)
+      if (!authorized) return null
+      const st = statSync(authorized.resolvedPath)
       if (maxSize && st.size > maxSize) return null
-      return readFileSync(resolved).toString('base64')
+      return readFileSync(authorized.resolvedPath).toString('base64')
     }
   )
 

@@ -6,13 +6,23 @@
  */
 
 import { basename, join, dirname, extname, resolve, posix as pathPosix } from 'node:path'
-import { readFileSync, readdirSync, statSync, mkdirSync, existsSync, writeFileSync, unlinkSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync, mkdirSync, existsSync, writeFileSync, unlinkSync, mkdtempSync, rmSync, realpathSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
+import { execFile } from 'node:child_process'
 import AdmZip from 'adm-zip'
 import { DOMParser } from '@xmldom/xmldom'
-import type { OfficePreviewResult } from '@proma/shared'
+import type {
+  FilePreviewNotice,
+  LibreOfficeStatus,
+  MarkupPreviewResult,
+  OfficePreviewResult,
+  PdfPreviewResult,
+  SpreadsheetCell,
+  SpreadsheetPreviewResult,
+  SpreadsheetSheetPreview,
+} from '@proma/shared'
 
 const require = createRequire(__filename)
 const PDFJS_PACKAGE = 'pdfjs-dist'
@@ -20,9 +30,12 @@ const PDFJS_PACKAGE = 'pdfjs-dist'
 /** 文件大小限制：50MB */
 const MAX_FILE_SIZE = 50 * 1024 * 1024
 const MAX_XLSX_SHEETS = 8
-const MAX_XLSX_ROWS = 100
-const MAX_XLSX_COLUMNS = 40
+const MAX_SPREADSHEET_CELLS = 100_000
+const MAX_ZIP_ENTRIES = 8_000
+const MAX_ZIP_UNCOMPRESSED_BYTES = 180 * 1024 * 1024
 const MAX_PPTX_SLIDES = 80
+const LIBREOFFICE_TIMEOUT_MS = 45_000
+let libreOfficeQueue: Promise<void> = Promise.resolve()
 
 // ─── 临时文件 ───
 
@@ -214,6 +227,17 @@ function readZipText(zip: AdmZip, path: string): string | null {
   return entry ? entry.getData().toString('utf-8') : null
 }
 
+function assertZipWithinPreviewLimits(zip: AdmZip): void {
+  const entries = zip.getEntries()
+  if (entries.length > MAX_ZIP_ENTRIES) {
+    throw new Error(`压缩包条目过多，无法安全预览（${entries.length} > ${MAX_ZIP_ENTRIES}）`)
+  }
+  const totalSize = entries.reduce((sum, entry) => sum + entry.header.size, 0)
+  if (totalSize > MAX_ZIP_UNCOMPRESSED_BYTES) {
+    throw new Error('压缩包解压后体积过大，已停止预览')
+  }
+}
+
 function normalizeZipTarget(baseDir: string, target: string): string {
   const normalizedTarget = target.replace(/\\/g, '/')
   if (normalizedTarget.startsWith('/')) return normalizedTarget.slice(1)
@@ -330,27 +354,28 @@ function columnNameFromIndex(index: number): string {
   return name
 }
 
-function getXlsxCellText(cell: Element, sharedStrings: string[], dateStyleIndexes: Set<number>): string {
+function getXlsxCellValue(cell: Element, sharedStrings: string[], dateStyleIndexes: Set<number>): { value: string; formula?: string } {
   const type = cell.getAttribute('t')
+  const formula = getFirstTextByLocalName(cell, 'f') || undefined
   if (type === 'inlineStr') {
-    return getElementsByLocalName(cell, 't').map((node) => node.textContent ?? '').join('')
+    return { value: getElementsByLocalName(cell, 't').map((node) => node.textContent ?? '').join(''), formula }
   }
 
   const value = getFirstTextByLocalName(cell, 'v')
-  if (!value) return ''
+  if (!value) return { value: '', formula }
 
   if (type === 's') {
     const sharedIndex = Number(value)
-    return Number.isInteger(sharedIndex) ? sharedStrings[sharedIndex] ?? '' : ''
+    return { value: Number.isInteger(sharedIndex) ? sharedStrings[sharedIndex] ?? '' : '', formula }
   }
-  if (type === 'b') return value === '1' ? 'TRUE' : 'FALSE'
+  if (type === 'b') return { value: value === '1' ? 'TRUE' : 'FALSE', formula }
 
   const styleIndex = Number(cell.getAttribute('s'))
   if (!type && Number.isInteger(styleIndex) && dateStyleIndexes.has(styleIndex)) {
-    return formatExcelSerialDate(value)
+    return { value: formatExcelSerialDate(value), formula }
   }
 
-  return value
+  return { value, formula }
 }
 
 function parseXlsxSheetRows(
@@ -358,37 +383,78 @@ function parseXlsxSheetRows(
   sheetPath: string,
   sharedStrings: string[],
   dateStyleIndexes: Set<number>,
-): { rows: string[][]; truncatedRows: boolean; truncatedColumns: boolean } {
+  sheetIndex: number,
+  sheetName: string,
+  remainingCells: number,
+): { sheet: SpreadsheetSheetPreview; textRows: string[]; usedCells: number; truncated: boolean } {
   const sheetXml = readZipText(zip, sheetPath)
-  if (!sheetXml) return { rows: [], truncatedRows: false, truncatedColumns: false }
+  if (!sheetXml) {
+    return {
+      sheet: { name: sheetName, index: sheetIndex, rowCount: 0, columnCount: 0, cells: [], truncated: false },
+      textRows: [],
+      usedCells: 0,
+      truncated: false,
+    }
+  }
 
   const doc = parseXml(sheetXml)
-  const rows: string[][] = []
-  let truncatedRows = false
-  let truncatedColumns = false
+  const cells: SpreadsheetCell[] = []
+  const textRowMap = new Map<number, string[]>()
+  let maxRow = 0
+  let maxColumn = 0
+  let usedCells = 0
+  let truncated = false
 
   for (const row of getElementsByLocalName(doc, 'row')) {
-    if (rows.length >= MAX_XLSX_ROWS) {
-      truncatedRows = true
-      break
-    }
-
-    const values: string[] = []
     for (const cell of getDirectChildElementsByLocalName(row, 'c')) {
       const cellRef = cell.getAttribute('r') ?? ''
       const colIndex = columnIndexFromCellRef(cellRef)
-      if (colIndex >= MAX_XLSX_COLUMNS) {
-        truncatedColumns = true
-        continue
-      }
-      values[colIndex] = getXlsxCellText(cell, sharedStrings, dateStyleIndexes)
-    }
+      const rowIndexRaw = Number(cellRef.match(/\d+/)?.[0])
+      const rowIndex = Number.isInteger(rowIndexRaw) && rowIndexRaw > 0 ? rowIndexRaw - 1 : 0
+      const parsed = getXlsxCellValue(cell, sharedStrings, dateStyleIndexes)
+      if (!parsed.value.trim() && !parsed.formula) continue
 
-    while (values.length > 0 && !values[values.length - 1]) values.pop()
-    if (values.some((value) => value.trim().length > 0)) rows.push(values)
+      if (usedCells >= remainingCells) {
+        truncated = true
+        break
+      }
+
+      cells.push({
+        row: rowIndex,
+        column: colIndex,
+        value: parsed.value,
+        ...(parsed.formula ? { formula: parsed.formula } : {}),
+      })
+      const textRow = textRowMap.get(rowIndex) ?? []
+      textRow[colIndex] = parsed.value
+      textRowMap.set(rowIndex, textRow)
+      maxRow = Math.max(maxRow, rowIndex + 1)
+      maxColumn = Math.max(maxColumn, colIndex + 1)
+      usedCells++
+    }
+    if (truncated) break
   }
 
-  return { rows, truncatedRows, truncatedColumns }
+  const textRows = Array.from(textRowMap.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([, row]) => {
+      while (row.length > 0 && !row[row.length - 1]) row.pop()
+      return row.join('\t')
+    })
+
+  return {
+    sheet: {
+      name: sheetName,
+      index: sheetIndex,
+      rowCount: maxRow,
+      columnCount: maxColumn,
+      cells,
+      truncated,
+    },
+    textRows,
+    usedCells,
+    truncated,
+  }
 }
 
 function renderXlsxTable(rows: string[][]): string {
@@ -410,8 +476,33 @@ function renderXlsxTable(rows: string[][]): string {
   return `<div class="office-table-wrap"><table><thead><tr><th></th>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`
 }
 
-function convertXlsxToHtml(filePath: string, resolvedPath: string): OfficePreviewResult {
+function sheetPreviewToRows(sheet: SpreadsheetSheetPreview, maxRows = 100, maxColumns = 40): string[][] {
+  const visibleRows = Math.min(sheet.rowCount, maxRows)
+  const visibleColumns = Math.min(sheet.columnCount, maxColumns)
+  const rows = Array.from({ length: visibleRows }, () => Array.from({ length: visibleColumns }, () => ''))
+  for (const cell of sheet.cells) {
+    if (cell.row < visibleRows && cell.column < visibleColumns) {
+      rows[cell.row]![cell.column] = cell.value
+    }
+  }
+  return rows.filter((row) => row.some((value) => value.trim().length > 0))
+}
+
+function renderSpreadsheetPreviewHtml(filePath: string, preview: SpreadsheetPreviewResult): string {
+  const title = escapeHtml(basename(filePath))
+  const notices = preview.notices.map((notice) => notice.message)
+  const noticeHtml = notices.length > 0
+    ? `<div class="office-preview-notice">${escapeHtml(notices.join('，'))}</div>`
+    : ''
+  const htmlParts = preview.sheets.map((sheet) => (
+    `<section class="office-sheet"><h3>${escapeHtml(sheet.name)}</h3>${renderXlsxTable(sheetPreviewToRows(sheet))}</section>`
+  ))
+  return `<div class="office-preview office-preview-spreadsheet"><div class="office-preview-title">${title}</div>${noticeHtml}${htmlParts.join('')}</div>`
+}
+
+function convertXlsxToSpreadsheetPreview(resolvedPath: string): SpreadsheetPreviewResult {
   const zip = new AdmZip(resolvedPath)
+  assertZipWithinPreviewLimits(zip)
   const workbookXml = readZipText(zip, 'xl/workbook.xml')
   if (!workbookXml) throw new Error('Invalid XLSX: workbook.xml missing')
 
@@ -421,47 +512,117 @@ function convertXlsxToHtml(filePath: string, resolvedPath: string): OfficePrevie
   const dateStyleIndexes = parseXlsxDateStyleIndexes(zip)
   const sheets = getElementsByLocalName(workbookDoc, 'sheet')
 
-  let truncatedSheets = false
-  let truncatedRows = false
-  let truncatedColumns = false
+  const notices: FilePreviewNotice[] = []
   const textParts: string[] = []
-  const htmlParts: string[] = []
+  const sheetPreviews: SpreadsheetSheetPreview[] = []
+  let remainingCells = MAX_SPREADSHEET_CELLS
 
   sheets.slice(0, MAX_XLSX_SHEETS).forEach((sheet, sheetIndex) => {
+    if (remainingCells <= 0) return
     const name = sheet.getAttribute('name') || `Sheet ${sheetIndex + 1}`
     const relationshipId = sheet.getAttribute('r:id') ?? sheet.getAttribute('id')
     const sheetPath = relationshipId ? relationships.get(relationshipId) : undefined
     if (!sheetPath) return
 
-    const parsed = parseXlsxSheetRows(zip, sheetPath, sharedStrings, dateStyleIndexes)
-    truncatedRows ||= parsed.truncatedRows
-    truncatedColumns ||= parsed.truncatedColumns
+    const parsed = parseXlsxSheetRows(zip, sheetPath, sharedStrings, dateStyleIndexes, sheetIndex, name, remainingCells)
+    remainingCells -= parsed.usedCells
     textParts.push(`[${name}]`)
-    textParts.push(...parsed.rows.map((row) => row.join('\t')))
-    htmlParts.push(`<section class="office-sheet"><h3>${escapeHtml(name)}</h3>${renderXlsxTable(parsed.rows)}</section>`)
+    textParts.push(...parsed.textRows)
+    sheetPreviews.push(parsed.sheet)
+    if (parsed.truncated) {
+      notices.push({ kind: 'truncated', message: `表格达到 ${MAX_SPREADSHEET_CELLS} 个非空单元格上限，后续内容已截断` })
+    }
   })
 
-  if (htmlParts.length === 0) {
+  if (sheetPreviews.length === 0) {
     throw new Error('Invalid XLSX: no worksheet data resolved')
   }
 
-  truncatedSheets = sheets.length > MAX_XLSX_SHEETS
-  const notices = [
-    truncatedSheets ? `仅显示前 ${MAX_XLSX_SHEETS} 个工作表` : null,
-    truncatedRows ? `每个工作表最多显示 ${MAX_XLSX_ROWS} 行` : null,
-    truncatedColumns ? `每行最多显示 ${MAX_XLSX_COLUMNS} 列` : null,
-  ].filter(Boolean)
-  const noticeHtml = notices.length > 0
-    ? `<div class="office-preview-notice">${escapeHtml(notices.join('，'))}</div>`
-    : ''
-  const title = escapeHtml(basename(filePath))
-  const html = `<div class="office-preview office-preview-spreadsheet"><div class="office-preview-title">${title}</div>${noticeHtml}${htmlParts.join('')}</div>`
+  if (sheets.length > MAX_XLSX_SHEETS) {
+    notices.push({ kind: 'truncated', message: `仅解析前 ${MAX_XLSX_SHEETS} 个工作表` })
+  }
 
   return {
     resolvedPath,
     kind: 'spreadsheet',
-    html,
+    sheets: sheetPreviews,
+    notices,
     text: textParts.join('\n').trim(),
+  }
+}
+
+function convertXlsxToHtml(filePath: string, resolvedPath: string): OfficePreviewResult {
+  const spreadsheet = convertXlsxToSpreadsheetPreview(resolvedPath)
+  return {
+    resolvedPath,
+    kind: 'spreadsheet',
+    html: renderSpreadsheetPreviewHtml(filePath, spreadsheet),
+    text: spreadsheet.text,
+    notices: spreadsheet.notices,
+    spreadsheet,
+  }
+}
+
+export async function convertDelimitedToSpreadsheetPreview(filePath: string): Promise<SpreadsheetPreviewResult | null> {
+  if (!existsSync(filePath)) return null
+  const st = statSync(filePath)
+  if (st.size > MAX_FILE_SIZE) return null
+
+  const ext = extname(filePath).toLowerCase()
+  const delimiter = ext === '.tsv' ? '\t' : undefined
+  const source = readFileSync(filePath, 'utf-8')
+  const Papa = await import('papaparse')
+  const parsed = Papa.parse<string[]>(source, {
+    delimiter,
+    skipEmptyLines: false,
+  })
+  const notices: FilePreviewNotice[] = []
+  if (parsed.errors.length > 0) {
+    notices.push({ kind: 'fallback', message: `解析过程中发现 ${parsed.errors.length} 个 CSV/TSV 格式问题，已尽量展示可读内容` })
+  }
+
+  const cells: SpreadsheetCell[] = []
+  let usedCells = 0
+  let rowCount = 0
+  let columnCount = 0
+  let truncated = false
+
+  for (let rowIndex = 0; rowIndex < parsed.data.length; rowIndex++) {
+    const row = parsed.data[rowIndex] ?? []
+    rowCount = Math.max(rowCount, rowIndex + 1)
+    columnCount = Math.max(columnCount, row.length)
+    for (let columnIndex = 0; columnIndex < row.length; columnIndex++) {
+      const value = String(row[columnIndex] ?? '')
+      if (!value.trim()) continue
+      if (usedCells >= MAX_SPREADSHEET_CELLS) {
+        truncated = true
+        break
+      }
+      cells.push({ row: rowIndex, column: columnIndex, value })
+      usedCells++
+    }
+    if (truncated) break
+  }
+
+  if (truncated) {
+    notices.push({ kind: 'truncated', message: `表格达到 ${MAX_SPREADSHEET_CELLS} 个非空单元格上限，后续内容已截断` })
+  }
+
+  const sheet: SpreadsheetSheetPreview = {
+    name: basename(filePath),
+    index: 0,
+    rowCount,
+    columnCount,
+    cells,
+    truncated,
+  }
+
+  return {
+    resolvedPath: filePath,
+    kind: 'spreadsheet',
+    sheets: [sheet],
+    notices,
+    text: parsed.data.map((row) => row.join('\t')).join('\n'),
   }
 }
 
@@ -544,6 +705,28 @@ export function resolveAndReadFile(filePath: string, basePaths?: string[]): { re
   }
 }
 
+/** 读取 HTML/SVG 源码，并签发同目录资源 base URL */
+export async function prepareMarkupPreview(filePath: string): Promise<MarkupPreviewResult | null> {
+  if (!existsSync(filePath)) return null
+  try {
+    const st = statSync(filePath)
+    if (st.size > MAX_FILE_SIZE) return null
+    const { registerPromaDirectoryPath } = await import('./local-file-protocol')
+    const source = readFileSync(filePath, 'utf-8')
+    const baseUrl = `${registerPromaDirectoryPath(dirname(filePath))}/`
+    return {
+      resolvedPath: filePath,
+      source,
+      baseUrl,
+      previewUrl: baseUrl,
+      notices: [],
+    }
+  } catch (err) {
+    console.error('[file-preview] prepareMarkupPreview failed:', err)
+    return null
+  }
+}
+
 /** 仅解析文件路径（不读取内容），供图片等用 proma-file:// 协议加载的场景使用 */
 export function resolveFilePath(filePath: string, basePaths?: string[]): string | null {
   const safePath = resolveTargetPath(filePath, basePaths)
@@ -551,7 +734,7 @@ export function resolveFilePath(filePath: string, basePaths?: string[]): string 
 }
 
 /** 为内联 PDF 预览生成临时 HTML 文件（使用 proma-file:// 加载 PDF，无体积膨胀） */
-export async function preparePdfPreview(filePath: string, basePaths?: string[]): Promise<{ resolvedPath: string; tmpHtmlUrl: string } | null> {
+export async function preparePdfPreview(filePath: string, basePaths?: string[]): Promise<PdfPreviewResult | null> {
   const safePath = resolveTargetPath(filePath, basePaths)
   if (!existsSync(safePath)) return null
   const st = statSync(safePath)
@@ -560,6 +743,8 @@ export async function preparePdfPreview(filePath: string, basePaths?: string[]):
   let fileUrl: string
   let pdfScriptUrl: string
   let pdfWorkerUrl: string
+  let pdfViewerUrl: string
+  let pdfViewerCssUrl: string
   let standardFontDataUrl: string
   let registerFilePath: (path: string) => string
   try {
@@ -568,6 +753,8 @@ export async function preparePdfPreview(filePath: string, basePaths?: string[]):
     fileUrl = registerPromaFilePath(safePath)
     pdfScriptUrl = registerPromaFilePath(require.resolve(`${PDFJS_PACKAGE}/build/pdf.min.mjs`))
     pdfWorkerUrl = registerPromaFilePath(require.resolve(`${PDFJS_PACKAGE}/build/pdf.worker.min.mjs`))
+    pdfViewerUrl = registerPromaFilePath(require.resolve(`${PDFJS_PACKAGE}/web/pdf_viewer.mjs`))
+    pdfViewerCssUrl = registerPromaFilePath(require.resolve(`${PDFJS_PACKAGE}/web/pdf_viewer.css`))
     const pdfPackageDir = dirname(require.resolve(`${PDFJS_PACKAGE}/package.json`))
     standardFontDataUrl = `${registerPromaDirectoryPath(join(pdfPackageDir, 'standard_fonts'))}/`
   } catch (err) {
@@ -577,76 +764,145 @@ export async function preparePdfPreview(filePath: string, basePaths?: string[]):
 
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' proma-file:; style-src 'unsafe-inline' proma-file:; img-src proma-file: data: blob:; font-src proma-file: data:; connect-src proma-file:; worker-src proma-file: blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+<link rel="stylesheet" href="${pdfViewerCssUrl}">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: transparent; overflow: auto; padding: 16px; }
-  #c { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; width: fit-content; min-width: 100%; }
-  #c canvas { box-shadow: 0 2px 8px rgba(0,0,0,0.15); margin: 0 auto; display: block; }
-  .loading { color: #888; font: 12px/1.5 system-ui; padding: 40px; text-align: center; width: 100%; }
-  .error { color: #f87171; font: 12px/1.5 system-ui; padding: 20px; text-align: center; width: 100%; }
-  .page-info { color: #888; font: 11px/1.5 system-ui; text-align: center; padding: 4px; width: 100%; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; color: #d4d4d8; font: 12px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  #toolbar { position: fixed; inset: 8px 10px auto 10px; z-index: 20; display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 5px 8px; border: 1px solid rgba(148,163,184,.25); border-radius: 8px; background: rgba(24,24,27,.84); backdrop-filter: blur(10px); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  #toolbar button, #toolbar input { height: 24px; border: 1px solid rgba(148,163,184,.24); border-radius: 6px; background: rgba(255,255,255,.06); color: inherit; }
+  #toolbar button { min-width: 26px; padding: 0 8px; cursor: pointer; }
+  #toolbar input { width: min(260px, 34vw); padding: 0 8px; outline: none; }
+  #toolbar .spacer { flex: 1; }
+  #status, #matches { color: #a1a1aa; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #viewerContainer { position: absolute; inset: 0; padding-top: 52px; overflow: auto; }
+  #viewer.viewer { --scale-factor: 1; }
+  .pdfViewer .page { margin: 10px auto; border: 0; box-shadow: 0 8px 22px rgba(0,0,0,.18); }
+  .loading, .error { padding: 72px 20px; text-align: center; color: #a1a1aa; }
+  .error { color: #f87171; }
 </style>
 </head><body>
-  <div class="loading" id="c">正在加载 PDF...</div>
+  <div id="toolbar">
+    <button type="button" id="zoomOut" title="缩小">−</button>
+    <span id="zoomLabel">100%</span>
+    <button type="button" id="zoomIn" title="放大">+</button>
+    <span id="status">正在加载 PDF...</span>
+    <span class="spacer"></span>
+    <input id="findInput" placeholder="搜索 PDF" autocomplete="off">
+    <button type="button" id="findPrev" title="上一个">↑</button>
+    <button type="button" id="findNext" title="下一个">↓</button>
+    <span id="matches"></span>
+  </div>
+  <div id="viewerContainer">
+    <div id="viewer" class="pdfViewer"></div>
+  </div>
   <script type="module">
-    const container = document.getElementById('c');
+    const container = document.getElementById('viewerContainer');
+    const viewerElement = document.getElementById('viewer');
+    const status = document.getElementById('status');
+    const matches = document.getElementById('matches');
+    const zoomLabel = document.getElementById('zoomLabel');
+    const findInput = document.getElementById('findInput');
     const fileUrl = ${JSON.stringify(fileUrl)};
     const pdfScriptUrl = ${JSON.stringify(pdfScriptUrl)};
     const pdfWorkerUrl = ${JSON.stringify(pdfWorkerUrl)};
+    const pdfViewerUrl = ${JSON.stringify(pdfViewerUrl)};
     const standardFontDataUrl = ${JSON.stringify(standardFontDataUrl)};
-    const STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
+    const STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
     let stepIdx = 2;
-    let pdfDoc = null;
+    let pdfViewer = null;
+    let eventBus = null;
 
     function notifyZoom() {
-      window.parent.postMessage({ type: 'pdf-zoom-changed', zoom: Math.round(STEPS[stepIdx] * 100) }, '*');
+      const zoom = Math.round(STEPS[stepIdx] * 100);
+      zoomLabel.textContent = zoom + '%';
+      window.parent.postMessage({ type: 'pdf-zoom-changed', zoom }, '*');
     }
 
-    async function renderAll() {
-      if (!pdfDoc) return;
-      container.innerHTML = '';
-      const userScale = STEPS[stepIdx];
-      const dpr = window.devicePixelRatio || 1;
-      for (let i = 1; i <= pdfDoc.numPages; i++) {
-        const page = await pdfDoc.getPage(i);
-        const vp = page.getViewport({ scale: userScale * dpr });
-        const canvas = document.createElement('canvas');
-        canvas.width = vp.width; canvas.height = vp.height;
-        canvas.style.width = (vp.width / dpr) + 'px';
-        canvas.style.height = (vp.height / dpr) + 'px';
-        await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
-        container.appendChild(canvas);
-      }
-      const info = document.createElement('div');
-      info.className = 'page-info';
-      info.textContent = '共 ' + pdfDoc.numPages + ' 页';
-      container.appendChild(info);
+    function setScale() {
+      if (!pdfViewer) return;
+      pdfViewer.currentScale = STEPS[stepIdx];
       notifyZoom();
     }
 
+    function dispatchFind(previous = false) {
+      if (!eventBus) return;
+      eventBus.dispatch('find', {
+        source: window,
+        type: '',
+        query: findInput.value,
+        phraseSearch: true,
+        caseSensitive: false,
+        entireWord: false,
+        highlightAll: true,
+        findPrevious: previous,
+      });
+    }
+
     window.addEventListener('message', (e) => {
-      if (e.data?.type === 'pdf-zoom') {
-        if (e.data.direction === 'in' && stepIdx < STEPS.length - 1) { stepIdx++; renderAll(); }
-        if (e.data.direction === 'out' && stepIdx > 0) { stepIdx--; renderAll(); }
+      if (e.source !== window.parent || !e.data || e.data.type !== 'pdf-zoom') return;
+      if (e.data.direction === 'in' && stepIdx < STEPS.length - 1) { stepIdx++; setScale(); }
+      if (e.data.direction === 'out' && stepIdx > 0) { stepIdx--; setScale(); }
+    });
+
+    document.getElementById('zoomOut').addEventListener('click', () => {
+      if (stepIdx > 0) { stepIdx--; setScale(); }
+    });
+    document.getElementById('zoomIn').addEventListener('click', () => {
+      if (stepIdx < STEPS.length - 1) { stepIdx++; setScale(); }
+    });
+    document.getElementById('findPrev').addEventListener('click', () => dispatchFind(true));
+    document.getElementById('findNext').addEventListener('click', () => dispatchFind(false));
+    findInput.addEventListener('input', () => dispatchFind(false));
+    findInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        dispatchFind(event.shiftKey);
       }
     });
 
     try {
       const pdfjsLib = await import(pdfScriptUrl);
+      const pdfViewerLib = await import(pdfViewerUrl);
       pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-      pdfDoc = await pdfjsLib.getDocument({
+      eventBus = new pdfViewerLib.EventBus();
+      const linkService = new pdfViewerLib.PDFLinkService({ eventBus });
+      const findController = new pdfViewerLib.PDFFindController({ eventBus, linkService });
+      pdfViewer = new pdfViewerLib.PDFViewer({
+        container,
+        viewer: viewerElement,
+        eventBus,
+        linkService,
+        findController,
+        textLayerMode: 2,
+      });
+      linkService.setViewer(pdfViewer);
+      eventBus.on('pagesinit', () => setScale());
+      eventBus.on('pagechanging', (event) => {
+        status.textContent = event.pageNumber + ' / ' + pdfViewer.pagesCount + ' 页';
+      });
+      eventBus.on('updatefindmatchescount', (event) => {
+        const total = event.matchesCount?.total ?? 0;
+        const current = event.matchesCount?.current ?? 0;
+        matches.textContent = total > 0 ? current + ' / ' + total : '';
+      });
+      const pdfDoc = await pdfjsLib.getDocument({
         url: fileUrl,
         standardFontDataUrl,
       }).promise;
-      await renderAll();
+      pdfViewer.setDocument(pdfDoc);
+      linkService.setDocument(pdfDoc, null);
+      findController.setDocument(pdfDoc);
+      status.textContent = '1 / ' + pdfDoc.numPages + ' 页';
     } catch (err) {
-      container.innerHTML = '<div class="error">PDF 加载失败: ' + err.message + '<\\/div>';
+      container.innerHTML = '<div class="error">PDF 加载失败: ' + (err?.message || String(err)) + '<\\/div>';
+      status.textContent = 'PDF 加载失败';
     }
   <\/script>
 <\/body><\/html>`
   const tmpHtmlPath = writeTempHtml(html)
   const tmpHtmlUrl = registerFilePath(tmpHtmlPath)
-  return { resolvedPath: safePath, tmpHtmlUrl }
+  return { resolvedPath: safePath, sourceUrl: fileUrl, tmpHtmlUrl, notices: [] }
 }
 
 /** 将 DOCX 文件转换为 HTML（供内联预览使用） */
@@ -677,6 +933,119 @@ function renderOfficeTextFallback(filePath: string, text: string, kind: OfficePr
   return `<div class="office-preview office-preview-${kind}"><div class="office-preview-title">${title}</div>${body}</div>`
 }
 
+function findLibreOfficeExecutable(): string | null {
+  const candidates = process.platform === 'darwin'
+    ? [
+        '/Applications/LibreOffice.app/Contents/MacOS/soffice',
+        '/opt/homebrew/bin/soffice',
+        '/usr/local/bin/soffice',
+        '/usr/bin/soffice',
+      ]
+    : process.platform === 'win32'
+      ? [
+          'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
+          'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
+        ]
+      : ['/usr/bin/soffice', '/usr/local/bin/soffice', '/snap/bin/libreoffice', '/usr/bin/libreoffice']
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? null
+}
+
+export function getLibreOfficeStatus(): LibreOfficeStatus {
+  const executablePath = findLibreOfficeExecutable()
+  return { available: Boolean(executablePath), executablePath }
+}
+
+function execFileWithTimeout(command: string, args: string[], timeoutMs: number): Promise<void> {
+  return new Promise((resolvePromise, reject) => {
+    const child = execFile(command, args, { timeout: timeoutMs, shell: false }, (error) => {
+      if (error) {
+        reject(error)
+        return
+      }
+      resolvePromise()
+    })
+    child.on('error', reject)
+  })
+}
+
+async function runLibreOfficeJob(job: () => Promise<void>): Promise<void> {
+  const previous = libreOfficeQueue
+  let release!: () => void
+  libreOfficeQueue = new Promise((resolveRelease) => {
+    release = resolveRelease
+  })
+  await previous.catch(() => undefined)
+  try {
+    await job()
+  } finally {
+    release()
+  }
+}
+
+async function convertWithLibreOfficeToPdf(filePath: string): Promise<{ pdfPath: string; notices: FilePreviewNotice[]; libreOffice: LibreOfficeStatus } | null> {
+  const libreOffice = getLibreOfficeStatus()
+  if (!libreOffice.available || !libreOffice.executablePath) return null
+
+  const st = statSync(filePath)
+  const cacheKey = createHash('sha256')
+    .update(`${realpathSync(filePath)}:${st.mtimeMs}:${st.size}:pdf`)
+    .digest('hex')
+    .slice(0, 24)
+  const cacheDir = join(getPreviewTmpDir(), 'office-pdf-cache')
+  if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true })
+  const cachedPdfPath = join(cacheDir, `${cacheKey}.pdf`)
+  if (existsSync(cachedPdfPath)) {
+    return {
+      pdfPath: cachedPdfPath,
+      notices: [{ kind: 'fallback', message: '已使用 LibreOffice 转换缓存' }],
+      libreOffice,
+    }
+  }
+
+  const outDir = mkdtempSync(join(tmpdir(), 'proma-lo-out-'))
+  const profileDir = mkdtempSync(join(tmpdir(), 'proma-lo-profile-'))
+  const profileUrl = `file://${profileDir.replace(/\\/g, '/')}`
+  try {
+    await runLibreOfficeJob(() => execFileWithTimeout(libreOffice.executablePath!, [
+        '--headless',
+        '--nologo',
+        '--nofirststartwizard',
+        '--nodefault',
+        '--nolockcheck',
+        `-env:UserInstallation=${profileUrl}`,
+        '--convert-to',
+        'pdf',
+        '--outdir',
+        outDir,
+        filePath,
+      ], LIBREOFFICE_TIMEOUT_MS))
+
+    const generated = readdirSync(outDir).find((entry) => entry.toLowerCase().endsWith('.pdf'))
+    if (!generated) {
+      throw new Error('LibreOffice 没有生成 PDF')
+    }
+    const generatedPath = join(outDir, generated)
+    writeFileSync(cachedPdfPath, readFileSync(generatedPath))
+    return { pdfPath: cachedPdfPath, notices: [], libreOffice }
+  } catch (err) {
+    console.warn('[file-preview] LibreOffice 转换失败:', err instanceof Error ? err.message : err)
+    return {
+      pdfPath: '',
+      notices: [{
+        kind: err instanceof Error && /timed out|timeout/i.test(err.message) ? 'conversion-timeout' : 'conversion-failed',
+        message: err instanceof Error && /timed out|timeout/i.test(err.message)
+          ? 'LibreOffice 转换超时，已切换到文本预览'
+          : 'LibreOffice 转换失败，已切换到文本预览',
+      }],
+      libreOffice,
+    }
+  } finally {
+    try { rmSync(outDir, { recursive: true, force: true }) } catch { /* skip */ }
+    try { rmSync(profileDir, { recursive: true, force: true }) } catch { /* skip */ }
+  }
+}
+
 /** 将 XLSX/PPTX 转成可内联展示的 HTML 预览 */
 export async function convertOfficeToHtml(filePath: string, basePaths?: string[]): Promise<OfficePreviewResult | null> {
   const safePath = resolveTargetPath(filePath, basePaths)
@@ -688,6 +1057,63 @@ export async function convertOfficeToHtml(filePath: string, basePaths?: string[]
 
     const ext = extname(safePath).toLowerCase()
     if (ext === '.xlsx') return convertXlsxToHtml(filePath, safePath)
+    if (ext === '.pptx' || ext === '.doc' || ext === '.xls' || ext === '.ppt') {
+      const converted = await convertWithLibreOfficeToPdf(safePath)
+      if (converted?.pdfPath) {
+        const pdf = await preparePdfPreview(converted.pdfPath)
+        if (pdf) {
+          return {
+            resolvedPath: safePath,
+            kind: ext === '.pptx' || ext === '.ppt' ? 'presentation' : 'legacy',
+            html: '',
+            text: '',
+            presentationMode: 'pdf',
+            pdf,
+            libreOffice: converted.libreOffice,
+            notices: converted.notices,
+          }
+        }
+      }
+      if (ext === '.pptx') {
+        const fallback = convertPptxToHtml(filePath, safePath)
+        return {
+          ...fallback,
+          presentationMode: 'text',
+          libreOffice: converted?.libreOffice ?? getLibreOfficeStatus(),
+          notices: [
+            ...(converted?.notices ?? [{ kind: 'conversion-unavailable' as const, message: '未检测到 LibreOffice，已使用 PPTX 文本预览' }]),
+          ],
+        }
+      }
+      if (ext === '.doc') {
+        const wordExtractor = await import('word-extractor')
+        const extractor = new wordExtractor.default()
+        const doc = await extractor.extract(safePath)
+        const text = doc.getBody()
+        return {
+          resolvedPath: safePath,
+          kind: 'legacy',
+          html: renderOfficeTextFallback(filePath, text, 'legacy'),
+          text,
+          presentationMode: 'text',
+          libreOffice: converted?.libreOffice ?? getLibreOfficeStatus(),
+          notices: [
+            ...(converted?.notices ?? [{ kind: 'conversion-unavailable' as const, message: '未检测到 LibreOffice，已使用 Word 文本降级预览' }]),
+          ],
+        }
+      }
+      return {
+        resolvedPath: safePath,
+        kind: 'legacy',
+        html: renderOfficeTextFallback(filePath, '', 'legacy'),
+        text: '',
+        presentationMode: 'text',
+        libreOffice: converted?.libreOffice ?? getLibreOfficeStatus(),
+        notices: [
+          ...(converted?.notices ?? [{ kind: 'conversion-unavailable' as const, message: '未检测到 LibreOffice，无法内联预览旧版 Office 文件' }]),
+        ],
+      }
+    }
     if (ext === '.pptx') return convertPptxToHtml(filePath, safePath)
     return null
   } catch (err) {

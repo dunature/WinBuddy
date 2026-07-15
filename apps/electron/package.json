@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.14.20",
+  "version": "0.14.21",
   "description": "Proma next gen ai software with general agents - Electron App",
   "main": "dist/main.cjs",
   "author": {
@@ -41,11 +41,14 @@
     "@fontsource-variable/inter": "5.2.8",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@pierre/diffs": "^1.1.20",
+    "@tanstack/react-virtual": "3.14.6",
     "@xmldom/xmldom": "^0.8.11",
     "adm-zip": "^0.5.17",
     "dompurify": "^3.4.5",
+    "docx-preview": "0.4.0",
     "iconv-lite": "^0.6.3",
     "mammoth": "^1.12.0",
+    "papaparse": "5.5.4",
     "pdfjs-dist": "^4.10.38"
   },
   "optionalDependencies": {
@@ -100,6 +103,7 @@
     "@types/dompurify": "^3.2.0",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^20.0.0",
+    "@types/papaparse": "5.5.2",
     "@types/pdf-parse": "^1.1.5",
     "@types/pngjs": "^6.0.5",
     "@types/qrcode": "^1.5.6",

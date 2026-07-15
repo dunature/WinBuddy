@@ -11,6 +11,7 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import DOMPurify from 'dompurify'
 import { File as PierreFile } from '@pierre/diffs/react'
 import { toast } from 'sonner'
+import type { MarkupPreviewResult, OfficePreviewResult, SpreadsheetPreviewResult } from '@proma/shared'
 import { cn } from '@/lib/utils'
 import {
   agentDiffPanelTabAtom,
@@ -37,14 +38,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { PIERRE_FILE_CSS } from '@/components/agent/tool-result-renderers/pierre-styles'
 import { SelectionActionPopover } from '@/components/selection/SelectionActionPopover'
 import { SELECTION_ACTION_POPOVER_SELECTOR } from '@/lib/quoted-selection'
+import { DocxPreview } from './preview/DocxPreview'
+import { MarkupPreview } from './preview/MarkupPreview'
+import { PdfPreview } from './preview/PdfPreview'
+import { PresentationPreview } from './preview/PresentationPreview'
+import { PreviewErrorState } from './preview/PreviewErrorState'
+import { SpreadsheetPreview } from './preview/SpreadsheetPreview'
+import { getExtension, getPreviewKind, isEditableTextPreview } from './preview/preview-registry'
 
-const MD_EXTS = new Set(['.md', '.markdown'])
-const PLAIN_TEXT_EDIT_EXTS = new Set(['.txt', '.text', '.log'])
-const PDF_EXTS = new Set(['.pdf'])
-const DOCX_EXTS = new Set(['.docx'])
-const OFFICE_PREVIEW_EXTS = new Set(['.xlsx', '.pptx'])
-const LEGACY_OFFICE_EXTS = new Set(['.doc', '.xls', '.ppt'])
-const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'])
 const FILE_FIND_SHORTCUT_OPTIONS = { exclusive: true }
 
 /**
@@ -62,6 +63,10 @@ type CacheEntry = {
   pdfSrc?: string
   imageDataUrl?: string
   imagePath?: string
+  markupPreview?: MarkupPreviewResult
+  spreadsheetPreview?: SpreadsheetPreviewResult
+  officeResult?: OfficePreviewResult
+  docxFileUrl?: string
   docxHtml?: string
   officeHtml?: string
   officeText?: string
@@ -127,11 +132,6 @@ function cacheSet(key: string, value: CacheEntry): void {
     const oldestKey = contentCache.keys().next().value
     if (oldestKey !== undefined) contentCache.delete(oldestKey)
   }
-}
-
-function getExtension(filePath: string): string {
-  const dot = filePath.lastIndexOf('.')
-  return dot >= 0 ? filePath.slice(dot).toLowerCase() : ''
 }
 
 /** 判断选区是否在容器内（穿透 Shadow DOM 边界） */
@@ -243,6 +243,10 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const [autosaveStatus, setAutosaveStatus] = React.useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const lastSavedDraftRef = React.useRef('')
   const autosaveTimerRef = React.useRef<number | null>(null)
+  const [markupPreview, setMarkupPreview] = React.useState<MarkupPreviewResult | null>(null)
+  const [spreadsheetPreview, setSpreadsheetPreview] = React.useState<SpreadsheetPreviewResult | null>(null)
+  const [officeResult, setOfficeResult] = React.useState<OfficePreviewResult | null>(null)
+  const [docxFileUrl, setDocxFileUrl] = React.useState('')
   const [docxHtml, setDocxHtml] = React.useState('')
   const [officeHtml, setOfficeHtml] = React.useState('')
   const [officeText, setOfficeText] = React.useState('')
@@ -270,14 +274,18 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const [tocOpen, setTocOpen] = useAtom(markdownTocOpenAtom)
 
   const ext = getExtension(filePath)
-  const isMarkdown = previewOnly && MD_EXTS.has(ext)
-  const isPlainTextEditable = previewOnly && PLAIN_TEXT_EDIT_EXTS.has(ext)
-  const isEditableText = isMarkdown || isPlainTextEditable
-  const isPdf = previewOnly && PDF_EXTS.has(ext)
-  const isDocx = previewOnly && DOCX_EXTS.has(ext)
-  const isOfficePreview = previewOnly && OFFICE_PREVIEW_EXTS.has(ext)
-  const isLegacyOffice = previewOnly && LEGACY_OFFICE_EXTS.has(ext)
-  const isImage = previewOnly && IMAGE_EXTS.has(ext)
+  const previewKind = previewOnly ? getPreviewKind(filePath) : 'binary'
+  const isMarkdown = previewKind === 'markdown'
+  const isEditableText = previewOnly && isEditableTextPreview(previewKind)
+  const isPlainTextEditable = previewKind === 'text'
+  const isPdf = previewKind === 'pdf'
+  const isDocx = previewKind === 'docx'
+  const isSpreadsheet = previewKind === 'spreadsheet'
+  const isPresentation = previewKind === 'presentation'
+  const isLegacyOffice = previewKind === 'legacy-office'
+  const isMarkup = previewKind === 'markup'
+  const isSvg = previewKind === 'svg'
+  const isImage = previewKind === 'image'
   const canTogglePreviewWrap =
     previewOnly &&
     !markdownEditing &&
@@ -285,7 +293,10 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     !isPdf &&
     !isImage &&
     !isDocx &&
-    !isOfficePreview &&
+    !isSpreadsheet &&
+    !isPresentation &&
+    !isMarkup &&
+    !isSvg &&
     !isLegacyOffice &&
     newContent.length > 0 &&
     newContent.length <= MAX_PREVIEW_CHARS
@@ -311,11 +322,14 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     loading,
     newLength: newContent.length,
     oldLength: oldContent.length,
+    markupLength: markupPreview?.source.length ?? 0,
+    spreadsheetSheets: spreadsheetPreview?.sheets.length ?? 0,
+    officeMode: officeResult?.presentationMode ?? '',
     docxLength: docxHtml.length,
     officeLength: officeHtml.length,
     markdownEditing,
     markdownSourceMode,
-  }), [docxHtml.length, filePath, loading, markdownEditing, markdownSourceMode, newContent.length, officeHtml.length, oldContent.length, previewOnly, viewMode])
+  }), [docxHtml.length, filePath, loading, markdownEditing, markdownSourceMode, markupPreview?.source.length, newContent.length, officeHtml.length, officeResult?.presentationMode, oldContent.length, previewOnly, spreadsheetPreview?.sheets.length, viewMode])
 
   // 目录提取只需在「文件本身或其内容」变化时重建，避免 loading/编辑态切换造成的抖动
   const tocContentKey = React.useMemo(
@@ -523,6 +537,10 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   React.useEffect(() => {
     setOldContent('')
     setNewContent('')
+    setMarkupPreview(null)
+    setSpreadsheetPreview(null)
+    setOfficeResult(null)
+    setDocxFileUrl('')
     setDocxHtml('')
     setOfficeHtml('')
     setOfficeText('')
@@ -532,12 +550,12 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     setImageDataUrl('')
     setImageZoom(0.25)
     setImageNaturalSize({ w: 0, h: 0 })
-    setLoading(!isLegacyOffice)
+    setLoading(true)
     setMarkdownEditing(false)
     setMarkdownSourceMode(false)
     setMarkdownDraft('')
     setMarkdownSaving(false)
-  }, [filePath, sessionId, previewOnly, isLegacyOffice])
+  }, [filePath, sessionId, previewOnly])
 
   // non-passive wheel listener for pinch-to-zoom on image
   React.useEffect(() => {
@@ -590,6 +608,10 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       lastOldContentRef.current = cached.oldContent
       setOldContent(cached.oldContent)
       setNewContent(cached.newContent)
+      setMarkupPreview(cached.markupPreview ?? null)
+      setSpreadsheetPreview(cached.spreadsheetPreview ?? null)
+      setOfficeResult(cached.officeResult ?? null)
+      setDocxFileUrl(cached.docxFileUrl ?? '')
       setDocxHtml(cached.docxHtml ?? '')
       setOfficeHtml(cached.officeHtml ?? '')
       setOfficeText(cached.officeText ?? '')
@@ -602,9 +624,13 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       setLoading(false)
       return // 缓存命中，直接返回，不执行 load()
     } else {
-      if (!isLegacyOffice) setLoading(true)
+      setLoading(true)
       setOldContent('')
       setNewContent('')
+      setMarkupPreview(null)
+      setSpreadsheetPreview(null)
+      setOfficeResult(null)
+      setDocxFileUrl('')
       setDocxHtml('')
       setOfficeHtml('')
       setOfficeText('')
@@ -652,25 +678,68 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
               }
               return
             }
-            if (isDocx) {
-              const result = await window.electronAPI.docxToHtml(filePath, fileAccess)
+            if (isMarkup || isSvg) {
+              const [markup, resolved] = await Promise.all([
+                window.electronAPI.prepareMarkupPreview(filePath, fileAccess),
+                isSvg ? window.electronAPI.resolveFilePath(filePath, fileAccess) : Promise.resolve(null),
+              ])
               if (cancelled) return
-              const html = DOMPurify.sanitize(result?.html ?? '')
-              setDocxHtml(html)
-              cacheSet(cacheKey, { oldContent: '', newContent: '', docxHtml: html })
+              setMarkupPreview(markup)
+              setNewContent(markup?.source ?? '')
+              if (resolved) {
+                setImageDataUrl(resolved.url)
+              }
+              cacheSet(cacheKey, {
+                oldContent: '',
+                newContent: markup?.source ?? '',
+                markupPreview: markup ?? undefined,
+                imageDataUrl: resolved?.url ?? '',
+              })
               return
             }
-            if (isOfficePreview) {
+            if (isDocx) {
+              const [result, resolved] = await Promise.all([
+                window.electronAPI.docxToHtml(filePath, fileAccess),
+                window.electronAPI.resolveFilePath(filePath, fileAccess),
+              ])
+              if (cancelled) return
+              const html = DOMPurify.sanitize(result?.html ?? '')
+              setDocxFileUrl(resolved?.url ?? '')
+              setDocxHtml(html)
+              cacheSet(cacheKey, { oldContent: '', newContent: '', docxHtml: html, docxFileUrl: resolved?.url ?? '' })
+              return
+            }
+            if (isSpreadsheet) {
+              const result = await window.electronAPI.spreadsheetPreview(filePath, fileAccess)
+              if (cancelled) return
+              setSpreadsheetPreview(result)
+              setOfficeText(result?.text ?? '')
+              cacheSet(cacheKey, {
+                oldContent: '',
+                newContent: '',
+                spreadsheetPreview: result ?? undefined,
+                officeText: result?.text ?? '',
+              })
+              return
+            }
+            if (isPresentation || isLegacyOffice) {
               const result = await window.electronAPI.officeToHtml(filePath, fileAccess)
               if (cancelled) return
               const html = DOMPurify.sanitize(result?.html ?? '')
               const text = result?.text ?? ''
+              const safeResult = result ? { ...result, html } : null
+              setOfficeResult(safeResult)
               setOfficeHtml(html)
               setOfficeText(text)
-              cacheSet(cacheKey, { oldContent: '', newContent: '', officeHtml: html, officeText: text })
-              return
-            }
-            if (isLegacyOffice) {
+              setPdfSrc(result?.pdf?.tmpHtmlUrl ?? '')
+              cacheSet(cacheKey, {
+                oldContent: '',
+                newContent: '',
+                officeResult: safeResult ?? undefined,
+                officeHtml: html,
+                officeText: text,
+                pdfSrc: result?.pdf?.tmpHtmlUrl ?? '',
+              })
               return
             }
             const result = await window.electronAPI.resolveAndReadFile(filePath, fileAccess)
@@ -691,7 +760,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
           if (cacheKey) cacheSet(cacheKey, { oldContent: old, newContent: content })
         }
 
-        if (previewOnly && !MD_EXTS.has(ext) && content) {
+        if (previewOnly && previewKind !== 'markdown' && content) {
           if (!cancelled) setLoading(false)
         }
       } catch {
@@ -704,7 +773,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     load()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, dirPath, gitRoot, previewOnly, previewContentVersion, fileAccess, isPdf, isDocx, isOfficePreview, isLegacyOffice, isImage, sessionId, ext, getContentCacheKey])
+  }, [filePath, dirPath, gitRoot, previewOnly, previewContentVersion, fileAccess, isPdf, isMarkup, isSvg, isDocx, isSpreadsheet, isPresentation, isLegacyOffice, isImage, sessionId, previewKind, getContentCacheKey, baseRef])
 
   // refreshVersion 触发的静默刷新：仅 diff 模式、内容有变化时才更新 state
   const prevRefreshRef = React.useRef(-1)
@@ -761,13 +830,17 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     if (toastedPreviewFailRef.current === key) return
     let message: string | null = null
     if (isLegacyOffice) {
-      message = `暂不支持 ${ext.toUpperCase().slice(1)} 格式内联预览`
+      message = officeResult ? null : `无法加载 ${ext.toUpperCase().slice(1)} 预览`
     } else if (isPdf && !pdfSrc) {
       message = 'PDF 文件过大，无法在此预览'
     } else if (isDocx && !docxHtml) {
       message = '无法加载 DOCX 预览'
-    } else if (isOfficePreview && !officeHtml) {
-      message = `无法加载 ${ext === '.pptx' ? 'PPTX' : 'Excel'} 预览`
+    } else if (isSpreadsheet && !spreadsheetPreview) {
+      message = '无法加载表格预览'
+    } else if (isPresentation && !officeResult) {
+      message = '无法加载 PPTX 预览'
+    } else if ((isMarkup || isSvg) && !markupPreview) {
+      message = `无法加载 ${isSvg ? 'SVG' : 'HTML'} 预览`
     } else if (isImage && !imageDataUrl) {
       message = '图片文件过大，无法在此预览'
     }
@@ -775,7 +848,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       toastedPreviewFailRef.current = key
       toast.warning(message)
     }
-  }, [previewOnly, loading, filePath, ext, isLegacyOffice, isPdf, pdfSrc, isDocx, docxHtml, isOfficePreview, officeHtml, isImage, imageDataUrl])
+  }, [previewOnly, loading, filePath, ext, isLegacyOffice, officeResult, isPdf, pdfSrc, isDocx, docxHtml, isSpreadsheet, spreadsheetPreview, isPresentation, isMarkup, isSvg, markupPreview, isImage, imageDataUrl])
 
   // scrollPosition persistent: module-level Map keyed by sessionId:filePath
   // content changes (refreshVersion bump) → delete stored position;
@@ -862,14 +935,18 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
 
   const handleCopy = React.useCallback(async () => {
     try {
-      const copyText = markdownEditing ? markdownDraft : (isOfficePreview ? officeText : newContent)
+      const copyText = markdownEditing
+        ? markdownDraft
+        : (isSpreadsheet || isPresentation || isLegacyOffice)
+            ? officeText
+            : newContent
       await navigator.clipboard.writeText(copyText)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
       // 复制失败
     }
-  }, [isOfficePreview, markdownDraft, markdownEditing, newContent, officeText])
+  }, [isSpreadsheet, isPresentation, isLegacyOffice, markdownDraft, markdownEditing, newContent, officeText])
 
   const startMarkdownEdit = React.useCallback(() => {
     if (!isEditableText) return
@@ -1276,29 +1353,11 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
             <div className="flex items-center justify-center h-full text-muted-foreground text-[12px]">加载中...</div>
           ) : previewOnly ? (
             isPdf ? (
-              pdfSrc ? (
-                <div className="relative h-full">
-                <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-2 py-1 rounded-lg bg-background/80 backdrop-filter backdrop-blur-sm border border-border/30 shadow-sm">
-                  <button
-                    type="button"
-                    className="w-6 h-6 rounded border border-border/30 flex items-center justify-center text-sm text-muted-foreground hover:bg-muted/50"
-                    onClick={() => pdfIframeRef.current?.contentWindow?.postMessage({ type: 'pdf-zoom', direction: 'out' }, '*')}
-                  >−</button>
-                  <span className="text-xs text-muted-foreground min-w-[40px] text-center font-mono">{pdfZoom}%</span>
-                  <button
-                    type="button"
-                    className="w-6 h-6 rounded border border-border/30 flex items-center justify-center text-sm text-muted-foreground hover:bg-muted/50"
-                    onClick={() => pdfIframeRef.current?.contentWindow?.postMessage({ type: 'pdf-zoom', direction: 'in' }, '*')}
-                  >+</button>
-                </div>
-                <iframe
-                  ref={pdfIframeRef}
-                  src={pdfSrc}
-                  className="w-full h-full border-0"
-                  title={filePath.split('/').pop() || 'PDF'}
-                />
-              </div>
-              ) : null
+              pdfSrc ? <PdfPreview src={pdfSrc} title={filePath.split('/').pop() || 'PDF'} onZoomChange={setPdfZoom} /> : <PreviewErrorState message="无法加载 PDF 预览" />
+            ) : isMarkup || isSvg ? (
+              markupPreview ? (
+                <MarkupPreview result={markupPreview} kind={isSvg ? 'svg' : 'html'} imageUrl={isSvg ? imageDataUrl : undefined} />
+              ) : <PreviewErrorState message={`无法加载 ${isSvg ? 'SVG' : 'HTML'} 预览`} />
             ) : isImage ? (
               imageDataUrl ? (
                 <div className="relative h-full">
@@ -1356,20 +1415,12 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
               </div>
               ) : null
             ) : isDocx ? (
-              docxHtml ? (
-                <div
-                  className="prose prose-sm dark:prose-invert max-w-none px-4 py-3"
-                  dangerouslySetInnerHTML={{ __html: docxHtml }}
-                />
-              ) : null
-            ) : isOfficePreview ? (
-              officeHtml ? (
-                <div
-                  className="office-preview-host"
-                  dangerouslySetInnerHTML={{ __html: officeHtml }}
-                />
-              ) : null
-            ) : isLegacyOffice ? null : isMarkdown ? (
+              <DocxPreview sourceUrl={docxFileUrl} fallbackHtml={docxHtml} />
+            ) : isSpreadsheet ? (
+              spreadsheetPreview ? <SpreadsheetPreview result={spreadsheetPreview} /> : <PreviewErrorState message="无法加载表格预览" />
+            ) : isPresentation || isLegacyOffice ? (
+              <PresentationPreview result={officeResult} title={filePath.split('/').pop() || 'Office'} onPdfZoomChange={setPdfZoom} />
+            ) : isMarkdown ? (
               markdownEditing && markdownSourceMode ? (
                 <textarea
                   value={markdownDraft}

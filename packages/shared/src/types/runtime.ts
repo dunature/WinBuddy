@@ -215,7 +215,69 @@ export interface ResolvedFileUrl {
 }
 
 /** Office 文件内联预览类型 */
-export type OfficePreviewKind = 'spreadsheet' | 'presentation'
+export type OfficePreviewKind = 'spreadsheet' | 'presentation' | 'legacy'
+
+/** 文件预览降级或截断原因 */
+export type FilePreviewNoticeKind = 'truncated' | 'fallback' | 'unsupported' | 'conversion-unavailable' | 'conversion-timeout' | 'conversion-failed'
+
+/** 文件预览提示 */
+export interface FilePreviewNotice {
+  kind: FilePreviewNoticeKind
+  message: string
+}
+
+/** HTML / SVG 源码与预览结果 */
+export interface MarkupPreviewResult {
+  resolvedPath: string
+  source: string
+  baseUrl: string
+  previewUrl: string
+  notices: FilePreviewNotice[]
+}
+
+/** PDF 预览结果 */
+export interface PdfPreviewResult {
+  resolvedPath: string
+  tmpHtmlUrl: string
+  sourceUrl: string
+  notices: FilePreviewNotice[]
+}
+
+/** 表格单元格 */
+export interface SpreadsheetCell {
+  row: number
+  column: number
+  value: string
+  formula?: string
+}
+
+/** 单个工作表预览数据 */
+export interface SpreadsheetSheetPreview {
+  name: string
+  index: number
+  rowCount: number
+  columnCount: number
+  cells: SpreadsheetCell[]
+  truncated: boolean
+}
+
+/** 结构化表格预览结果 */
+export interface SpreadsheetPreviewResult {
+  resolvedPath: string
+  kind: 'spreadsheet'
+  sheets: SpreadsheetSheetPreview[]
+  notices: FilePreviewNotice[]
+  text: string
+}
+
+/** LibreOffice 状态 */
+export interface LibreOfficeStatus {
+  available: boolean
+  executablePath: string | null
+}
+
+/** 演示文稿预览模式 */
+export type PresentationPreviewMode = 'pdf' | 'text'
 
 /** Office 文件内联预览结果 */
 export interface OfficePreviewResult {
@@ -223,6 +285,11 @@ export interface OfficePreviewResult {
   kind: OfficePreviewKind
   html: string
   text: string
+  notices?: FilePreviewNotice[]
+  spreadsheet?: SpreadsheetPreviewResult
+  presentationMode?: PresentationPreviewMode
+  pdf?: PdfPreviewResult
+  libreOffice?: LibreOfficeStatus
 }
 
 /**
