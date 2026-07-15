@@ -728,7 +728,13 @@ export interface ElectronAPI {
   resolveFilePath: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<import('@proma/shared').ResolvedFileUrl | null>
 
   /** 为内联 PDF 预览生成临时 HTML 文件，返回文件路径 */
-  preparePdfPreview: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<{ tmpHtmlUrl: string } | null>
+  preparePdfPreview: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<import('@proma/shared').PdfPreviewResult | null>
+
+  /** 准备 HTML/SVG 预览内容 */
+  prepareMarkupPreview: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<import('@proma/shared').MarkupPreviewResult | null>
+
+  /** 准备 CSV/TSV/XLSX 结构化表格预览 */
+  spreadsheetPreview: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<import('@proma/shared').SpreadsheetPreviewResult | null>
 
   /** 读取文件为 base64（带路径校验，供内联图片预览等） */
   readBinaryBase64: (filePath: string, access?: import('@proma/shared').FileAccessOptions, maxSize?: number) => Promise<string | null>
@@ -1871,7 +1877,15 @@ const electronAPI: ElectronAPI = {
   },
 
   preparePdfPreview: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {
-    return ipcRenderer.invoke('file:prepare-pdf-preview', filePath, access) as Promise<{ tmpHtmlUrl: string } | null>
+    return ipcRenderer.invoke('file:prepare-pdf-preview', filePath, access) as Promise<import('@proma/shared').PdfPreviewResult | null>
+  },
+
+  prepareMarkupPreview: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke('file:prepare-markup-preview', filePath, access) as Promise<import('@proma/shared').MarkupPreviewResult | null>
+  },
+
+  spreadsheetPreview: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke('file:spreadsheet-preview', filePath, access) as Promise<import('@proma/shared').SpreadsheetPreviewResult | null>
   },
 
   readBinaryBase64: (filePath: string, access?: import('@proma/shared').FileAccessOptions, maxSize?: number) => {
