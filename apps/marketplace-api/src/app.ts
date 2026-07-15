@@ -1,0 +1,54 @@
+import { Hono } from 'hono'
+import { cors } from 'hono/cors'
+import { requestId } from 'hono/request-id'
+import type { MarketplaceApiError } from '@proma/shared'
+import type { MarketplaceApiConfig } from './config.ts'
+import { MarketplaceApiException } from './errors.ts'
+
+export interface CreateMarketplaceAppOptions {
+  config: MarketplaceApiConfig
+  version?: string
+}
+
+export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono {
+  const app = new Hono()
+
+  app.use('*', requestId())
+  app.use('*', cors({
+    origin: (origin) => options.config.publicOrigins.includes(origin) ? origin : options.config.publicOrigins[0] ?? '',
+    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'X-Request-Id'],
+  }))
+
+  app.get('/health', (context) => context.json({
+    status: 'ok',
+    version: options.version ?? '0.1.0',
+  }))
+
+  app.notFound((context) => context.json<MarketplaceApiError>({
+    code: 'SKILL_NOT_FOUND',
+    message: '请求的 Marketplace 资源不存在',
+    requestId: context.get('requestId'),
+  }, 404))
+
+  app.onError((error, context) => {
+    const requestIdValue = context.get('requestId')
+    if (error instanceof MarketplaceApiException) {
+      return context.json<MarketplaceApiError>({
+        code: error.code,
+        message: error.message,
+        requestId: requestIdValue,
+        ...(error.details ? { details: error.details } : {}),
+      }, error.status as 400)
+    }
+
+    console.error(`[Marketplace API] 未处理错误 requestId=${requestIdValue}:`, error)
+    return context.json<MarketplaceApiError>({
+      code: 'INTERNAL_ERROR',
+      message: 'Marketplace 服务暂时不可用',
+      requestId: requestIdValue,
+    }, 500)
+  })
+
+  return app
+}
