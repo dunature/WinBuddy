@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useAtom } from 'jotai'
+import { useAtom, useSetAtom } from 'jotai'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ArrowLeft, Blocks, CheckCircle2, ChevronRight, File, Folder, Loader2, Search, Store, Wrench } from 'lucide-react'
@@ -9,6 +9,7 @@ import {
   marketplaceCategoryAtom,
   marketplaceDetailTabAtom,
   marketplaceQueryAtom,
+  marketplacePendingInstallSlugAtom,
   marketplaceScopeAtom,
   marketplaceSelectedExampleAtom,
   marketplaceSelectedFileAtom,
@@ -16,13 +17,15 @@ import {
   marketplaceSortAtom,
 } from '@/atoms/marketplace'
 import { ElectronMarketplaceApi } from '@/lib/marketplace-api'
+import { MarketplaceInstallDialog } from './MarketplaceInstallDialog'
 
 interface MarketplaceBrowserProps {
   apiUrl?: string
+  workspaceSlug: string
   onBack: () => void
 }
 
-export function MarketplaceBrowser({ apiUrl, onBack }: MarketplaceBrowserProps): React.ReactElement {
+export function MarketplaceBrowser({ apiUrl, workspaceSlug, onBack }: MarketplaceBrowserProps): React.ReactElement {
   const api = React.useMemo(() => new ElectronMarketplaceApi(apiUrl), [apiUrl])
   const [selectedSlug, setSelectedSlug] = useAtom(marketplaceSelectedSlugAtom)
 
@@ -40,6 +43,7 @@ export function MarketplaceBrowser({ apiUrl, onBack }: MarketplaceBrowserProps):
           ? <MarketplaceDetail api={api} slug={selectedSlug} />
           : <MarketplaceList api={api} onSelect={setSelectedSlug} />}
       </div>
+      <MarketplaceInstallDialog api={api} workspaceSlug={workspaceSlug} />
     </div>
   )
 }
@@ -103,6 +107,7 @@ function MarketplaceDetail({ api, slug }: { api: ElectronMarketplaceApi; slug: s
   const [detail, setDetail] = React.useState<MarketplaceSkillDetail | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [tab, setTab] = useAtom(marketplaceDetailTabAtom)
+  const setPendingInstall = useSetAtom(marketplacePendingInstallSlugAtom)
 
   React.useEffect(() => {
     const controller = new AbortController()
@@ -117,7 +122,7 @@ function MarketplaceDetail({ api, slug }: { api: ElectronMarketplaceApi; slug: s
   if (error) return <MarketplaceState icon={<Store />} title="无法加载 Skill" description={error} />
   if (!detail) return <MarketplaceState icon={<Loader2 className="animate-spin" />} title="正在加载详情" description="正在读取指南与权限信息。" />
 
-  return <div className="mx-auto w-full max-w-6xl px-8 pb-10"><div className="flex flex-wrap items-start justify-between gap-5 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border/50"><div><div className="flex items-center gap-3"><div className="grid size-12 place-items-center rounded-xl bg-orange-500/10 text-orange-600"><Blocks size={24} /></div><div><h2 className="text-2xl font-semibold">{detail.displayName}</h2><p className="mt-1 text-xs text-muted-foreground">@{detail.author.handle} · v{detail.version} · {detail.installCount.toLocaleString()} 次安装</p></div></div><p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground">{detail.description}</p></div><button type="button" disabled className="rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm disabled:opacity-60">安装到当前工作区</button></div><div className="mt-5 flex rounded-xl bg-muted p-1">{(['guide', 'files', 'examples'] as const).map((value) => <button type="button" key={value} onClick={() => setTab(value)} className={cn('flex-1 rounded-lg py-2 text-sm transition', tab === value ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground')}>{value === 'guide' ? '指南' : value === 'files' ? '文件' : '运行案例'}</button>)}</div>{tab === 'guide' ? <Guide detail={detail} /> : tab === 'files' ? <MarketplaceFiles api={api} detail={detail} /> : <MarketplaceExamples api={api} detail={detail} />}</div>
+  return <div className="mx-auto w-full max-w-6xl px-8 pb-10"><div className="flex flex-wrap items-start justify-between gap-5 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border/50"><div><div className="flex items-center gap-3"><div className="grid size-12 place-items-center rounded-xl bg-orange-500/10 text-orange-600"><Blocks size={24} /></div><div><h2 className="text-2xl font-semibold">{detail.displayName}</h2><p className="mt-1 text-xs text-muted-foreground">@{detail.author.handle} · v{detail.version} · {detail.installCount.toLocaleString()} 次安装</p></div></div><p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground">{detail.description}</p></div><button type="button" onClick={() => setPendingInstall(detail.slug)} className="rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">安装到当前工作区</button></div><div className="mt-5 flex rounded-xl bg-muted p-1">{(['guide', 'files', 'examples'] as const).map((value) => <button type="button" key={value} onClick={() => setTab(value)} className={cn('flex-1 rounded-lg py-2 text-sm transition', tab === value ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground')}>{value === 'guide' ? '指南' : value === 'files' ? '文件' : '运行案例'}</button>)}</div>{tab === 'guide' ? <Guide detail={detail} /> : tab === 'files' ? <MarketplaceFiles api={api} detail={detail} /> : <MarketplaceExamples api={api} detail={detail} />}</div>
 }
 
 function Guide({ detail }: { detail: MarketplaceSkillDetail }): React.ReactElement {

@@ -224,7 +224,7 @@ export function AgentSkillsView(): React.ReactElement {
   }
 
   if (surface === 'marketplace' && marketplaceConfig.enabled) {
-    return <MarketplaceBrowser apiUrl={marketplaceConfig.apiUrl} onBack={() => setSurface('library')} />
+    return <MarketplaceBrowser apiUrl={marketplaceConfig.apiUrl} workspaceSlug={data.workspaceSlug} onBack={() => setSurface('library')} />
   }
 
   return (

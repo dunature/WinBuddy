@@ -110,8 +110,14 @@ export function resolveMarketplaceInstallConflict(input: MarketplaceResolveConfl
     onProgress({ status: 'cancelled', installId: input.installId })
     return true
   }
-  commitMarketplaceInstall(session, onProgress)
-  return true
+  try {
+    commitMarketplaceInstall(session, onProgress)
+    return true
+  } catch (error) {
+    cleanupSession(session)
+    onProgress({ status: 'error', installId: session.installId, error: toInstallError(error) })
+    return false
+  }
 }
 
 export function getMarketplaceInstallerSession(installId: string): MarketplaceInstallerSession | undefined {
@@ -259,8 +265,7 @@ function commitMarketplaceInstall(session: MarketplaceInstallerSession, onProgre
     if (backupCreated && !existsSync(targetDir) && existsSync(backupDir)) {
       try { renameWithRetry(backupDir, targetDir) } catch (rollbackError) { console.error('[社区市场] 安装回滚失败:', rollbackError) }
     }
-    onProgress({ status: 'error', installId: session.installId, error: { code: 'INSTALL_COMMIT_FAILED', message: error instanceof Error ? error.message : '写入 Skill 失败', retryable: false } })
-    throw error
+    throw installerError('INSTALL_COMMIT_FAILED', error instanceof Error ? error.message : '写入 Skill 失败')
   }
 }
 

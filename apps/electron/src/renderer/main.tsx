@@ -61,6 +61,7 @@ import {
   initializeMarkdownFontSize,
 } from './atoms/markdown-font-size'
 import { useGlobalAgentListeners } from './hooks/useGlobalAgentListeners'
+import { useGlobalMarketplaceInstallListeners } from './hooks/useGlobalMarketplaceInstallListeners'
 import { useGlobalChatListeners } from './hooks/useGlobalChatListeners'
 import { tabsAtom, activeTabIdAtom, ensureScratchPadTab, getPersistableTabState, scratchPadContentAtom, scratchPadLoadedAtom, SCRATCH_PAD_ID } from './atoms/tab-atoms'
 import type { TabItem } from './atoms/tab-atoms'
@@ -479,6 +480,11 @@ function ChatListenersInitializer(): null {
  */
 function AgentListenersInitializer(): null {
   useGlobalAgentListeners()
+  return null
+}
+
+function MarketplaceInstallListenersInitializer(): null {
+  useGlobalMarketplaceInstallListeners()
   return null
 }
 
@@ -935,6 +941,7 @@ if (isQuickTaskWindow) {
       <MarkdownFontSizeInitializer />
       <ChatListenersInitializer />
       <AgentListenersInitializer />
+      <MarketplaceInstallListenersInitializer />
       <ChatToolInitializer />
       <UsageBudgetNotifier />
       <UpdaterInitializer />

@@ -1,5 +1,5 @@
 import { atom } from 'jotai'
-import type { MarketplaceScope, MarketplaceSort } from '@proma/shared'
+import type { MarketplaceInstallState, MarketplaceScope, MarketplaceSort } from '@proma/shared'
 
 export type MarketplaceDetailTab = 'guide' | 'files' | 'examples'
 
@@ -11,3 +11,6 @@ export const marketplaceSelectedSlugAtom = atom<string | null>(null)
 export const marketplaceDetailTabAtom = atom<MarketplaceDetailTab>('guide')
 export const marketplaceSelectedFileAtom = atom<string | null>(null)
 export const marketplaceSelectedExampleAtom = atom<string | null>(null)
+export const marketplacePendingInstallSlugAtom = atom<string | null>(null)
+export const marketplaceActiveInstallIdAtom = atom<string | null>(null)
+export const marketplaceInstallStatesAtom = atom<Map<string, MarketplaceInstallState>>(new Map())
