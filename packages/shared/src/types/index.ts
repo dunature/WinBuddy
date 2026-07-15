@@ -59,3 +59,7 @@ export * from './usage'
 
 // 提示词优化相关类型
 export * from './prompt-optimization'
+
+// Skill Marketplace 公共 API 与 Electron IPC
+export * from './marketplace'
+export * from './marketplace-ipc'
