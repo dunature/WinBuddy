@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, USAGE_IPC_CHANNELS, PROMPT_OPTIMIZATION_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, USAGE_IPC_CHANNELS, PROMPT_OPTIMIZATION_IPC_CHANNELS, MARKETPLACE_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
@@ -116,6 +116,11 @@ import type {
   PromptOptimizationRequest,
   PromptOptimizationCancelInput,
   OptimizedPromptResult,
+  MarketplaceCreateInstallInput,
+  MarketplaceCreateInstallResult,
+  MarketplaceStartInstallInput,
+  MarketplaceCancelInstallInput,
+  MarketplaceInstallState,
 } from '@proma/shared'
 import type {
   UserProfile,
@@ -412,6 +417,12 @@ export interface ElectronAPI {
   onInstallerProgress: (
     callback: (payload: InstallerProgressPayload) => void,
   ) => () => void
+
+  /** 创建、开始与取消 Marketplace 安装任务 */
+  createMarketplaceInstall: (input: MarketplaceCreateInstallInput) => Promise<MarketplaceCreateInstallResult>
+  startMarketplaceInstall: (input: MarketplaceStartInstallInput) => Promise<void>
+  cancelMarketplaceInstall: (input: MarketplaceCancelInstallInput) => Promise<boolean>
+  onMarketplaceInstallProgress: (callback: (state: MarketplaceInstallState) => void) => () => void
 
   // ===== 代理配置相关 =====
 
@@ -1454,6 +1465,15 @@ const electronAPI: ElectronAPI = {
     const listener = (_: unknown, payload: InstallerProgressPayload) => callback(payload)
     ipcRenderer.on(INSTALLER_IPC_CHANNELS.PROGRESS, listener)
     return () => ipcRenderer.off(INSTALLER_IPC_CHANNELS.PROGRESS, listener)
+  },
+
+  createMarketplaceInstall: (input: MarketplaceCreateInstallInput) => ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.CREATE_INSTALL, input),
+  startMarketplaceInstall: (input: MarketplaceStartInstallInput) => ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.START_INSTALL, input),
+  cancelMarketplaceInstall: (input: MarketplaceCancelInstallInput) => ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.CANCEL_INSTALL, input),
+  onMarketplaceInstallProgress: (callback: (state: MarketplaceInstallState) => void) => {
+    const listener = (_event: unknown, state: MarketplaceInstallState): void => callback(state)
+    ipcRenderer.on(MARKETPLACE_IPC_CHANNELS.INSTALL_PROGRESS, listener)
+    return () => ipcRenderer.off(MARKETPLACE_IPC_CHANNELS.INSTALL_PROGRESS, listener)
   },
 
   // 代理配置

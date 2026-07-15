@@ -46,7 +46,8 @@ export function getConfigDirName(): string {
  * 如果目录不存在则自动创建。
  */
 export function getConfigDir(): string {
-  const configDir = join(homedir(), getConfigDirName())
+  // 集成测试可将所有写入隔离到临时目录，生产环境不设置此变量。
+  const configDir = process.env.PROMA_CONFIG_DIR || join(homedir(), getConfigDirName())
 
   if (!existsSync(configDir)) {
     mkdirSync(configDir, { recursive: true })
@@ -365,6 +366,13 @@ export function getWorkspaceSkillsDir(slug: string): string {
     mkdirSync(dir, { recursive: true })
   }
 
+  return dir
+}
+
+/** Marketplace 安装临时目录。下载与 staging 始终位于目标 Skills 目录之外。 */
+export function getMarketplaceInstallsTempDir(): string {
+  const dir = join(getConfigDir(), 'tmp', 'marketplace-installs')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   return dir
 }
 
