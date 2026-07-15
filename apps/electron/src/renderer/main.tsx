@@ -513,6 +513,21 @@ function ChatToolInitializer(): null {
   return null
 }
 
+function UsageBudgetNotifier(): null {
+  useEffect(() => {
+    return window.electronAPI.onUsageBudgetAlert((event) => {
+      const percent = Math.round(event.usageRatio * 100)
+      const title = event.kind === 'exceeded' ? '用量预算已超过 100%' : '用量预算已达到提醒阈值'
+      toast.warning(title, {
+        description: `当前估算 $${event.spentUsd.toFixed(4)} / $${event.amountUsd.toFixed(2)}（${percent}%）`,
+        duration: 8000,
+      })
+    })
+  }, [])
+
+  return null
+}
+
 /**
  * 飞书集成初始化组件
  *
@@ -921,6 +936,7 @@ if (isQuickTaskWindow) {
       <ChatListenersInitializer />
       <AgentListenersInitializer />
       <ChatToolInitializer />
+      <UsageBudgetNotifier />
       <UpdaterInitializer />
       <AutomationInitializer />
       <FeishuInitializer />

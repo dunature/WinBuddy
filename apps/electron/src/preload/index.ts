@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, USAGE_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
@@ -105,6 +105,14 @@ import type {
   Automation,
   CreateAutomationInput,
   UpdateAutomationInput,
+  UsageBudgetAlert,
+  UsageBudgetStatus,
+  UsageExportFormat,
+  UsageExportResult,
+  UsageQueryInput,
+  UsageQueryResult,
+  UsageRescanResult,
+  UsageUpdatedEvent,
 } from '@proma/shared'
 import type {
   UserProfile,
@@ -330,6 +338,21 @@ export interface ElectronAPI {
 
   /** 订阅用户手动切换主题事件（跨窗口同步，返回清理函数） */
   onThemeSettingsChanged: (callback: (payload: { themeMode: string; themeStyle: string; interfaceVariant?: string }) => void) => () => void
+
+  // ===== Token 用量统计 =====
+
+  /** 查询用量历史 */
+  queryUsage: (input: UsageQueryInput) => Promise<UsageQueryResult>
+  /** 导出用量历史 */
+  exportUsage: (input: UsageQueryInput, format: UsageExportFormat) => Promise<UsageExportResult>
+  /** 获取预算状态 */
+  getUsageBudgetStatus: () => Promise<UsageBudgetStatus>
+  /** 重新扫描历史用量 */
+  rescanUsageHistory: () => Promise<UsageRescanResult>
+  /** 订阅用量写入事件 */
+  onUsageUpdated: (callback: (event: UsageUpdatedEvent) => void) => () => void
+  /** 订阅预算提醒事件 */
+  onUsageBudgetAlert: (callback: (event: UsageBudgetAlert) => void) => () => void
 
   // ===== Scratch Pad =====
 
@@ -1309,6 +1332,35 @@ const electronAPI: ElectronAPI = {
     const listener = (_: unknown, payload: { themeMode: string; themeStyle: string; interfaceVariant?: string }): void => callback(payload)
     ipcRenderer.on(SETTINGS_IPC_CHANNELS.ON_THEME_SETTINGS_CHANGED, listener)
     return () => { ipcRenderer.removeListener(SETTINGS_IPC_CHANNELS.ON_THEME_SETTINGS_CHANGED, listener) }
+  },
+
+  // Token 用量统计
+  queryUsage: (input: UsageQueryInput) => {
+    return ipcRenderer.invoke(USAGE_IPC_CHANNELS.QUERY, input)
+  },
+
+  exportUsage: (input: UsageQueryInput, format: UsageExportFormat) => {
+    return ipcRenderer.invoke(USAGE_IPC_CHANNELS.EXPORT, input, format)
+  },
+
+  getUsageBudgetStatus: () => {
+    return ipcRenderer.invoke(USAGE_IPC_CHANNELS.GET_BUDGET_STATUS)
+  },
+
+  rescanUsageHistory: () => {
+    return ipcRenderer.invoke(USAGE_IPC_CHANNELS.RESCAN)
+  },
+
+  onUsageUpdated: (callback: (event: UsageUpdatedEvent) => void) => {
+    const listener = (_: unknown, event: UsageUpdatedEvent): void => callback(event)
+    ipcRenderer.on(USAGE_IPC_CHANNELS.UPDATED, listener)
+    return () => { ipcRenderer.removeListener(USAGE_IPC_CHANNELS.UPDATED, listener) }
+  },
+
+  onUsageBudgetAlert: (callback: (event: UsageBudgetAlert) => void) => {
+    const listener = (_: unknown, event: UsageBudgetAlert): void => callback(event)
+    ipcRenderer.on(USAGE_IPC_CHANNELS.BUDGET_ALERT, listener)
+    return () => { ipcRenderer.removeListener(USAGE_IPC_CHANNELS.BUDGET_ALERT, listener) }
   },
 
   // Scratch Pad 持久化

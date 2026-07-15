@@ -10,7 +10,7 @@
  * - 累积工具调用信息（tool use 支持）
  */
 
-import type { ProviderAdapter, ProviderRequest, StreamEventCallback, ThinkingBlock, ToolCall } from './types.ts'
+import type { ProviderAdapter, ProviderRequest, StreamEventCallback, StreamUsage, ThinkingBlock, ToolCall } from './types.ts'
 
 // ===== 流式请求 =====
 
@@ -47,6 +47,8 @@ export interface StreamSSEResult {
   toolCalls: ToolCall[]
   /** 停止原因（'tool_use' 表示需要执行工具后继续） */
   stopReason?: string
+  /** 本次网络请求返回的最终 Token 用量 */
+  usage?: StreamUsage
 }
 
 // ===== 首字节前自动重试 =====
@@ -120,6 +122,16 @@ function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
     }, ms)
     signal?.addEventListener('abort', onAbort, { once: true })
   })
+}
+
+function mergeUsage(previous: StreamUsage | undefined, next: StreamUsage): StreamUsage {
+  return {
+    inputTokens: Math.max(previous?.inputTokens ?? 0, next.inputTokens),
+    outputTokens: Math.max(previous?.outputTokens ?? 0, next.outputTokens),
+    cacheReadInputTokens: Math.max(previous?.cacheReadInputTokens ?? 0, next.cacheReadInputTokens ?? 0),
+    cacheCreationInputTokens: Math.max(previous?.cacheCreationInputTokens ?? 0, next.cacheCreationInputTokens ?? 0),
+    costUsd: next.costUsd ?? previous?.costUsd,
+  }
 }
 
 /**
@@ -216,6 +228,7 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
   let content = ''
   let reasoning = ''
   let stopReason: string | undefined
+  let usage: StreamUsage | undefined
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
@@ -297,6 +310,8 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
             }
           } else if (event.type === 'done' && event.stopReason) {
             stopReason = event.stopReason
+          } else if (event.type === 'usage') {
+            usage = mergeUsage(usage, event.usage)
           }
           onEvent(event)
         }
@@ -333,7 +348,7 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
   }
 
   onEvent({ type: 'done', stopReason })
-  return { content, reasoning, thinkingBlocks, toolCalls, stopReason }
+  return { content, reasoning, thinkingBlocks, toolCalls, stopReason, usage }
 }
 
 // ===== 非流式标题请求 =====

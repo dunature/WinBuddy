@@ -211,7 +211,14 @@ export interface SDKResultMessage {
     cache_creation_input_tokens?: number
   }
   total_cost_usd?: number
-  modelUsage?: Record<string, { contextWindow?: number }>
+  modelUsage?: Record<string, {
+    inputTokens?: number
+    outputTokens?: number
+    cacheReadInputTokens?: number
+    cacheCreationInputTokens?: number
+    costUSD?: number
+    contextWindow?: number
+  }>
   errors?: string[]
   terminal_reason?: string
   background_tasks?: SDKBackgroundTaskSummary[]

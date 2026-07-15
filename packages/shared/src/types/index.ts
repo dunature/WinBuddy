@@ -53,3 +53,6 @@ export * from './wechat'
 
 // 定时任务（Automation）相关类型
 export * from './automation'
+
+// Token 用量统计相关类型
+export * from './usage'

@@ -9,7 +9,7 @@ import { join, resolve, sep, dirname } from 'node:path'
 import { existsSync, realpathSync, rmSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, isPromaPermissionMode, normalizePathForCompare } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, USAGE_IPC_CHANNELS, isPromaPermissionMode, normalizePathForCompare } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
   QuickTaskSubmitInput,
@@ -112,6 +112,12 @@ import type {
   Automation,
   CreateAutomationInput,
   UpdateAutomationInput,
+  UsageBudgetStatus,
+  UsageExportFormat,
+  UsageExportResult,
+  UsageQueryInput,
+  UsageQueryResult,
+  UsageRescanResult,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
@@ -152,6 +158,10 @@ import { extractTextFromAttachment } from './lib/document-parser'
 import { getTutorialContent, createWelcomeConversation } from './lib/tutorial-service'
 import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getSettings, updateSettings } from './lib/settings-service'
+import { queryUsage } from './lib/usage/usage-query-service'
+import { exportUsage } from './lib/usage/usage-export'
+import { getUsageBudgetStatus } from './lib/usage/usage-budget-service'
+import { rescanUsageHistory } from './lib/usage/usage-backfill'
 import { setBuiltinMcpUserEnabled } from './lib/builtin-mcp/settings'
 import { setDockBadgeCount } from './lib/dock-badge-service'
 
@@ -1526,6 +1536,50 @@ export function registerIpcHandlers(): void {
       win.webContents.send(SETTINGS_IPC_CHANNELS.ON_SYSTEM_THEME_CHANGED, isDark)
     })
   })
+
+  // ===== Token 用量统计 =====
+
+  ipcMain.handle(
+    USAGE_IPC_CHANNELS.QUERY,
+    async (_, input: UsageQueryInput): Promise<UsageQueryResult> => {
+      return queryUsage(input)
+    }
+  )
+
+  ipcMain.handle(
+    USAGE_IPC_CHANNELS.EXPORT,
+    async (event, input: UsageQueryInput, format: UsageExportFormat): Promise<UsageExportResult> => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const result = await dialog.showSaveDialog(win ?? BrowserWindow.getFocusedWindow()!, {
+        title: '导出用量统计',
+        defaultPath: `proma-usage.${format}`,
+        filters: [
+          format === 'csv'
+            ? { name: 'CSV 文件', extensions: ['csv'] }
+            : { name: 'JSON 文件', extensions: ['json'] },
+        ],
+      })
+      if (result.canceled || !result.filePath) {
+        return { filePath: '', recordCount: 0 }
+      }
+      const recordCount = exportUsage(input, format, result.filePath)
+      return { filePath: result.filePath, recordCount }
+    }
+  )
+
+  ipcMain.handle(
+    USAGE_IPC_CHANNELS.GET_BUDGET_STATUS,
+    async (): Promise<UsageBudgetStatus> => {
+      return getUsageBudgetStatus()
+    }
+  )
+
+  ipcMain.handle(
+    USAGE_IPC_CHANNELS.RESCAN,
+    async (): Promise<UsageRescanResult> => {
+      return rescanUsageHistory()
+    }
+  )
 
   // ===== Scratch Pad 持久化 =====
 
