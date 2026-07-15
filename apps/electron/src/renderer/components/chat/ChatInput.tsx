@@ -14,7 +14,7 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { CornerDownLeft, Square, Brain, Paperclip } from 'lucide-react'
+import { CornerDownLeft, Square, Brain, Paperclip, Sparkles, Loader2 } from 'lucide-react'
 import { ModelSelector } from './ModelSelector'
 import { ClearContextButton } from './ClearContextButton'
 import { ContextSettingsPopover } from './ContextSettingsPopover'
@@ -50,6 +50,7 @@ import {
 import { cn } from '@/lib/utils'
 import { fileToBase64, formatFileNames } from '@/lib/file-utils'
 import { MAX_ATTACHMENT_SIZE } from '@proma/shared'
+import type { OptimizedPromptResult } from '@proma/shared'
 import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
 import { toast } from 'sonner'
 
@@ -95,10 +96,18 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
   const [thinkingEnabled, setThinkingEnabled] = useConversationThinkingEnabled()
   const setPendingAttachments = onSetPendingAttachments
   const [isDragOver, setIsDragOver] = React.useState(false)
+  const [isOptimizing, setIsOptimizing] = React.useState(false)
+  const optimizeRunIdRef = React.useRef(0)
 
   const canSend = (content.trim().length > 0 || pendingAttachments.length > 0)
     && selectedModel !== null
     && !streaming
+    && !isOptimizing
+
+  const canOptimize = React.useMemo(() => {
+    const naturalText = content.replace(/(?<!\S)[@/#&][^\s，。！？；：,!?;:]+/g, '').trim()
+    return naturalText.length > 0 && selectedModel !== null && !streaming
+  }, [content, selectedModel, streaming])
 
   /**
    * 将文件列表添加为附件
@@ -106,6 +115,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
    * File → base64 → saveAttachment IPC → 创建 blob URL → 添加到 atom
    */
   const addFilesAsAttachments = React.useCallback(async (files: File[]): Promise<void> => {
+    if (isOptimizing) return
     const oversized: string[] = []
     const okFiles: File[] = []
 
@@ -151,10 +161,11 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
         console.error('[ChatInput] 添加附件失败:', error)
       }
     }
-  }, [setPendingAttachments])
+  }, [isOptimizing, setPendingAttachments])
 
   /** 通过 IPC 打开文件选择对话框 */
   const handleOpenFileDialog = React.useCallback(async (): Promise<void> => {
+    if (isOptimizing) return
     try {
       const result = await window.electronAPI.openFileDialog()
       const largeFiles = result.largeFiles ?? []
@@ -202,7 +213,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
     } catch (error) {
       console.error('[ChatInput] 文件选择对话框失败:', error)
     }
-  }, [setPendingAttachments])
+  }, [isOptimizing, setPendingAttachments])
 
   /** 移除待发送附件 */
   const handleRemoveAttachment = React.useCallback((id: string): void => {
@@ -268,6 +279,50 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
     // 附件清理由 ChatView 的 handleSend 负责
   }, [canSend, content, onSend])
 
+  const handleCancelOptimize = React.useCallback(async (): Promise<void> => {
+    optimizeRunIdRef.current += 1
+    await window.electronAPI.cancelPromptOptimization({ mode: 'chat', conversationId }).catch(console.error)
+    setIsOptimizing(false)
+  }, [conversationId])
+
+  const handleOptimizePrompt = React.useCallback(async (): Promise<void> => {
+    if (!canOptimize || !selectedModel || isOptimizing) return
+    const originalText = content
+    const runId = optimizeRunIdRef.current + 1
+    optimizeRunIdRef.current = runId
+    setIsOptimizing(true)
+
+    try {
+      const result: OptimizedPromptResult = await window.electronAPI.optimizePrompt({
+        mode: 'chat',
+        draftText: originalText,
+        conversationId,
+        currentModel: selectedModel,
+      })
+      if (optimizeRunIdRef.current !== runId) return
+      if (result.status === 'cancelled') return
+      if (result.status !== 'success' || !result.optimizedText) {
+        toast.error(result.errorMessage ?? '提示词优化失败')
+        return
+      }
+      setContent(result.optimizedText)
+      toast.success('已优化提示词', {
+        duration: Infinity,
+        closeButton: true,
+        action: {
+          label: '撤销',
+          onClick: () => setContent(originalText),
+        },
+      })
+    } catch (error) {
+      if (optimizeRunIdRef.current === runId) {
+        toast.error(error instanceof Error ? error.message : '提示词优化失败')
+      }
+    } finally {
+      if (optimizeRunIdRef.current === runId) setIsOptimizing(false)
+    }
+  }, [canOptimize, selectedModel, isOptimizing, content, conversationId, setContent])
+
   /** 粘贴文件回调 */
   const handlePasteFiles = React.useCallback((files: File[]): void => {
     addFilesAsAttachments(files)
@@ -292,10 +347,10 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
     setIsDragOver(false)
 
     const files = Array.from(e.dataTransfer.files)
-    if (files.length > 0) {
+    if (files.length > 0 && !isOptimizing) {
       addFilesAsAttachments(files)
     }
-  }, [addFilesAsAttachments])
+  }, [addFilesAsAttachments, isOptimizing])
 
   // 监听快捷键系统分发的 clear-context 事件（Cmd+K）
   React.useEffect(() => {
@@ -333,6 +388,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
                 thinkingEnabled && inputToolbarActiveButtonClass
               )}
               onClick={() => setThinkingEnabled(!thinkingEnabled)}
+              disabled={isOptimizing}
             >
               <Brain className="size-5" />
             </Button>
@@ -354,6 +410,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
               size="icon"
               className={inputToolbarButtonClass}
               onClick={handleOpenFileDialog}
+              disabled={isOptimizing}
             >
               <Paperclip className="size-5" />
             </Button>
@@ -364,11 +421,36 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
         </Tooltip>
       ),
     },
-    { key: 'speech', node: <SpeechButton className={inputToolbarButtonClass} /> },
+    { key: 'speech', node: <SpeechButton className={inputToolbarButtonClass} disabled={isOptimizing} /> },
+    {
+      key: 'optimize',
+      node: (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn(
+                inputToolbarButtonClass,
+                (!canOptimize && !isOptimizing) && inputToolbarDisabledButtonClass
+              )}
+              onClick={() => { void (isOptimizing ? handleCancelOptimize() : handleOptimizePrompt()) }}
+              disabled={!canOptimize && !isOptimizing}
+            >
+              {isOptimizing ? <Loader2 className="size-5 animate-spin" /> : <Sparkles className="size-5" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            <p>{isOptimizing ? '取消优化' : '优化提示词'}</p>
+          </TooltipContent>
+        </Tooltip>
+      ),
+    },
     { key: 'tools', node: <ToolSelectorPopover /> },
     { key: 'context', node: <ContextSettingsPopover /> },
-    { key: 'clear', node: <ClearContextButton onClick={onClearContext} /> },
-  ], [handleOpenFileDialog, thinkingEnabled, setThinkingEnabled, onClearContext])
+    { key: 'clear', node: <ClearContextButton onClick={onClearContext} disabled={isOptimizing} /> },
+  ], [handleOpenFileDialog, thinkingEnabled, setThinkingEnabled, canOptimize, isOptimizing, handleCancelOptimize, handleOptimizePrompt, onClearContext])
 
   const trailingNode = streaming ? (
     <Tooltip>
@@ -462,6 +544,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
             onSubmit={handleSend}
             onPasteFiles={handlePasteFiles}
             placeholder={sendWithCmdEnter ? '输入消息... (⌘/Ctrl+Enter 发送，Enter 换行)' : '输入消息... (Enter 发送，Shift+Enter 换行)'}
+            disabled={isOptimizing}
             autoFocusTrigger={conversationId}
             sendWithCmdEnter={sendWithCmdEnter}
           />

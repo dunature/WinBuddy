@@ -16,12 +16,13 @@ Proma 是一个本地优先的 AI 桌面应用，把多模型 Chat、通用 Agen
 
 ## 现在能做什么
 
-- **Chat 模式**：多模型对话、附件解析、图片输入、Markdown / Mermaid / KaTeX / 代码高亮、并排对话、系统提示词、上下文管理。
+- **Chat 模式**：多模型对话、附件解析、图片输入、Markdown / Mermaid / KaTeX / 代码高亮、并排对话、系统提示词、提示词优化、上下文管理。
 - **Agent 模式**：基于 `@anthropic-ai/claude-agent-sdk` 的通用 Agent，支持工作区隔离、权限模式、文件操作、长任务流式输出、计划确认和用户追问。
 - **SubAgent / Tasks**：复杂任务可以通过 Claude Agent SDK 的 Agent 工具拆分为子 Agent / Task，并在消息流中展示调用过程和结果。
 - **Skills & MCP**：每个工作区可以独立配置 Skills、MCP Server 和工作区文件，适合沉淀可复用能力。
 - **远程机器人**：支持飞书 / Lark 机器人桥接，并已提供钉钉、微信桥接入口，用手机或群聊触发本机 Agent 工作流。
 - **记忆与工具**：Chat 和 Agent 可共享记忆能力，并支持联网搜索、内置 Chat 工具、Agent 推荐等辅助能力。
+- **提示词优化**：Chat 和 Agent 输入框可用完整 Prompt Optimizer 框架库优化草稿，支持引用保护、取消、60 秒超时和 5 秒撤销。
 - **本地优先**：会话、工作区、附件、配置、Skills 等默认存储在 `~/.proma/`，使用 JSON / JSONL 文件组织，不依赖本地数据库。
 - **桌面体验**：自动更新、代理设置、文件预览、全局快捷键、快速任务窗口、语音输入、亮色 / 暗色 / 跟随系统主题。
 
@@ -290,6 +291,7 @@ Proma 目前设有 PR 赠金计划。提交 PR 时可以在描述中留下邮箱
 - [Cherry Studio](https://github.com/CherryHQ/cherry-studio)：多供应商桌面 AI 产品启发。
 - [Lobe Icons](https://github.com/lobehub/lobe-icons)：AI / LLM 品牌图标。
 - [Craft Agents OSS](https://github.com/lukilabs/craft-agents-oss)：Agent SDK 集成模式参考。
+- [Prompt Optimizer Skill](https://github.com/chujianyun/skills/tree/main/skills/prompt-optimizer)：提示词优化框架库，按 CC BY-NC-SA 4.0 随应用资源保留许可与来源记录。
 
 ## 许可证
 
