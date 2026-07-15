@@ -58,6 +58,8 @@ import { validateToolInput } from './agent-tool-input-validator'
 import { estimateTokenCount, WRITE_CONTENT_TOKEN_THRESHOLD } from './agent-tool-token-estimator'
 import { injectBuiltinMcpServers } from './builtin-mcp/registry'
 import { isVisibleRunMessage } from './agent-run-message-visibility'
+import { normalizeAgentUsage } from './usage/usage-normalizer'
+import { recordUsage } from './usage/usage-recorder'
 
 // ===== 类型定义 =====
 
@@ -732,6 +734,36 @@ export class AgentOrchestrator {
     })
 
     appendSDKMessages(sessionId, withTimestamps)
+    this.recordPersistedUsage(sessionId, withTimestamps)
+  }
+
+  private recordPersistedUsage(sessionId: string, messages: SDKMessage[]): void {
+    const session = getAgentSessionMeta(sessionId)
+    if (!session) return
+    const channel = session.channelId ? getChannelById(session.channelId) : undefined
+
+    for (const message of messages) {
+      if (message.type !== 'result') continue
+      const recordMessage = message as SDKMessage & Record<string, unknown>
+      const timestamp = typeof recordMessage._createdAt === 'number' ? recordMessage._createdAt : Date.now()
+      const durationMs = typeof recordMessage._durationMs === 'number' ? recordMessage._durationMs : undefined
+      const record = normalizeAgentUsage({
+        result: message,
+        timestamp,
+        durationMs,
+        session: {
+          sessionId: session.id,
+          sessionTitleSnapshot: session.title,
+          sessionType: session.sourceAutomationId && !session.automationGraduated ? 'automation' : 'agent',
+          automationId: session.sourceAutomationId,
+          workspaceId: session.workspaceId,
+          channelId: session.channelId,
+          provider: channel?.provider,
+          modelId: session.modelId,
+        },
+      })
+      if (record) recordUsage(record)
+    }
   }
 
   private persistUserMessage(sessionId: string, userMessage: string, createdAt = Date.now()): void {

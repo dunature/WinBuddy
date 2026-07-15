@@ -72,6 +72,9 @@ interface AnthropicMessage {
 /** Anthropic SSE 事件 */
 interface AnthropicSSEEvent {
   type: string
+  message?: {
+    usage?: AnthropicUsage
+  }
   /** content_block_start 的 content_block */
   content_block?: {
     type: string
@@ -91,6 +94,14 @@ interface AnthropicSSEEvent {
     /** message_delta 的 stop_reason */
     stop_reason?: string
   }
+  usage?: AnthropicUsage
+}
+
+interface AnthropicUsage {
+  input_tokens?: number
+  output_tokens?: number
+  cache_read_input_tokens?: number
+  cache_creation_input_tokens?: number
 }
 
 /** Anthropic 标题响应 */
@@ -426,6 +437,19 @@ export class AnthropicAdapter implements ProviderAdapter {
           // 普通文本内容（text_delta）
           events.push({ type: 'chunk', delta: event.delta.text })
         }
+      }
+
+      const usage = event.message?.usage ?? event.usage
+      if (usage) {
+        events.push({
+          type: 'usage',
+          usage: {
+            inputTokens: usage.input_tokens ?? 0,
+            outputTokens: usage.output_tokens ?? 0,
+            cacheReadInputTokens: usage.cache_read_input_tokens,
+            cacheCreationInputTokens: usage.cache_creation_input_tokens,
+          },
+        })
       }
 
       // message_delta 携带 stop_reason

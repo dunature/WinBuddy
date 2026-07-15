@@ -15,6 +15,7 @@ import type {
   VoiceDictationStateEvent,
 } from '../../types'
 import { VOICE_DICTATION_IPC_CHANNELS } from '../../types'
+import { getVoiceAsrHotwords } from './voice-dictionary-service'
 
 const PROTOCOL_VERSION = 0b0001
 const HEADER_SIZE = 0b0001
@@ -37,10 +38,9 @@ const COMPRESSION_GZIP = 0b0001
 
 const ASYNC_ENDPOINT = 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async'
 const DUPLEX_ENDPOINT = 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel'
+const ARK_AGENT_PLAN_ASYNC_ENDPOINT = 'wss://openspeech.bytedance.com/api/v3/plan/sauc/bigmodel_async'
 const DICTATION_END_WINDOW_SIZE_MS = 5000
 const DICTATION_FORCE_TO_SPEECH_TIME_MS = 1000
-const MAX_INLINE_HOTWORDS = 100
-const HOTWORD_SEPARATOR_PATTERN = /[\n,，、;；]+/u
 
 interface ServerUtterance {
   text?: string
@@ -82,27 +82,45 @@ interface ActiveSession {
 
 const activeSessions = new Map<string, ActiveSession>()
 
-function getEndpoint(settings: VoiceDictationSettings): string {
+export function resolveDoubaoAsrEndpoint(settings: VoiceDictationSettings): string {
+  if (settings.connectionMode === 'ark-agent-plan') return ARK_AGENT_PLAN_ASYNC_ENDPOINT
   return settings.endpointMode === 'duplex' ? DUPLEX_ENDPOINT : ASYNC_ENDPOINT
 }
 
-function parseCustomHotwords(value: string): DoubaoAsrHotword[] {
-  const seen = new Set<string>()
-  const hotwords: DoubaoAsrHotword[] = []
-
-  for (const rawWord of value.split(HOTWORD_SEPARATOR_PATTERN)) {
-    const word = rawWord.trim()
-    if (!word || seen.has(word)) continue
-    seen.add(word)
-    hotwords.push({ word })
-    if (hotwords.length >= MAX_INLINE_HOTWORDS) break
+export function buildDoubaoAsrAuthHeaders(settings: VoiceDictationSettings): Record<string, string> {
+  const connectId = randomUUID()
+  if (settings.connectionMode === 'ark-agent-plan') {
+    return {
+      'X-Api-Key': settings.accessToken,
+      'X-Api-Resource-Id': settings.resourceId,
+      'X-Api-Request-Id': connectId,
+      'X-Api-Connect-Id': connectId,
+      'X-Api-Sequence': '-1',
+    }
   }
 
-  return hotwords
+  return {
+    'X-Api-App-Key': settings.appId,
+    'X-Api-Access-Key': settings.accessToken,
+    'X-Api-Resource-Id': settings.resourceId,
+    'X-Api-Connect-Id': connectId,
+  }
+}
+
+function validateAsrSettings(settings: VoiceDictationSettings): string | null {
+  if (!settings.resourceId) return '请先填写 Resource ID'
+  if (settings.connectionMode === 'ark-agent-plan') {
+    return settings.accessToken ? null : '请先填写火山方舟 Agent Plan API Key'
+  }
+  if (!settings.appId || !settings.accessToken) {
+    return '请先填写 APP ID、Access Token 和 Resource ID'
+  }
+  return null
 }
 
 function buildCorpus(settings: VoiceDictationSettings): DoubaoAsrCorpus | undefined {
-  const hotwords = parseCustomHotwords(settings.customHotwords)
+  const hotwords: DoubaoAsrHotword[] = getVoiceAsrHotwords(settings.customHotwords)
+    .map((word) => ({ word }))
   if (hotwords.length === 0) return undefined
 
   return {
@@ -301,18 +319,12 @@ function parseServerMessage(data: Buffer): ParsedServerMessage | null {
 export async function testDoubaoAsrConnection(
   settings: VoiceDictationSettings,
 ): Promise<{ success: boolean; message: string }> {
-  if (!settings.appId || !settings.accessToken || !settings.resourceId) {
-    return { success: false, message: '请先填写 APP ID、Access Token 和 Resource ID' }
-  }
+  const validationError = validateAsrSettings(settings)
+  if (validationError) return { success: false, message: validationError }
 
   return await new Promise((resolve) => {
-    const ws = new WebSocket(getEndpoint(settings), {
-      headers: {
-        'X-Api-App-Key': settings.appId,
-        'X-Api-Access-Key': settings.accessToken,
-        'X-Api-Resource-Id': settings.resourceId,
-        'X-Api-Connect-Id': randomUUID(),
-      },
+    const ws = new WebSocket(resolveDoubaoAsrEndpoint(settings), {
+      headers: buildDoubaoAsrAuthHeaders(settings),
     })
 
     const timer = setTimeout(() => {
@@ -323,7 +335,7 @@ export async function testDoubaoAsrConnection(
     ws.once('open', () => {
       clearTimeout(timer)
       ws.close()
-      resolve({ success: true, message: '豆包 ASR 连接成功' })
+      resolve({ success: true, message: '语音识别连接成功' })
     })
 
     ws.once('error', (error: Error) => {
@@ -338,21 +350,15 @@ export async function startDoubaoAsrSession(
   settings: VoiceDictationSettings,
   win: BrowserWindow,
 ): Promise<void> {
-  if (!settings.appId || !settings.accessToken || !settings.resourceId) {
-    throw new Error('请先填写豆包 ASR 凭证')
-  }
+  const validationError = validateAsrSettings(settings)
+  if (validationError) throw new Error(validationError)
 
   await stopDoubaoAsrSession(sessionId)
-  sendState(win, { sessionId, status: 'connecting', message: '正在连接豆包 ASR...' })
+  sendState(win, { sessionId, status: 'connecting', message: '正在连接语音识别...' })
 
   await new Promise<void>((resolve, reject) => {
-    const ws = new WebSocket(getEndpoint(settings), {
-      headers: {
-        'X-Api-App-Key': settings.appId,
-        'X-Api-Access-Key': settings.accessToken,
-        'X-Api-Resource-Id': settings.resourceId,
-        'X-Api-Connect-Id': randomUUID(),
-      },
+    const ws = new WebSocket(resolveDoubaoAsrEndpoint(settings), {
+      headers: buildDoubaoAsrAuthHeaders(settings),
     })
 
     const active: ActiveSession = { sessionId, ws, win, closed: false }

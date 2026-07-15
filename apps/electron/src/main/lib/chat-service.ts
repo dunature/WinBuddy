@@ -21,15 +21,17 @@ import {
   streamSSE,
   fetchTitle,
 } from '@proma/core'
-import type { ImageAttachmentData, ContinuationMessage } from '@proma/core'
+import type { ImageAttachmentData, ContinuationMessage, StreamEvent, StreamUsage } from '@proma/core'
 import { listChannels, decryptApiKey } from './channel-manager'
-import { appendMessage, updateConversationMeta, getConversationMessages } from './conversation-manager'
+import { appendMessage, updateConversationMeta, getConversationMessages, listConversations } from './conversation-manager'
 import { readAttachmentAsBase64, isImageAttachment } from './attachment-service'
 import { extractTextFromAttachment, isDocumentAttachment } from './document-parser'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { getEnabledTools } from './chat-tool-registry'
 import { executeToolCalls } from './chat-tool-executor'
+import { normalizeChatUsage } from './usage/usage-normalizer'
+import { recordUsage } from './usage/usage-recorder'
 
 /** 活跃的 AbortController 映射（conversationId → controller） */
 const activeControllers = new Map<string, AbortController>()
@@ -249,6 +251,30 @@ export async function sendMessage(
   let accumulatedReasoning = ''
   const accumulatedToolActivities: ChatToolActivity[] = []
   const accumulatedGeneratedAttachments: FileAttachment[] = []
+  const streamStartedAt = Date.now()
+  let requestIndex = 0
+  let currentRequestUsage: StreamUsage | undefined
+
+  const recordStreamUsage = (usage: StreamUsage | undefined, status: 'success' | 'error' | 'aborted'): void => {
+    if (!usage) return
+    const conversation = listConversations().find((item) => item.id === conversationId)
+    const record = normalizeChatUsage({
+      usage,
+      timestamp: Date.now(),
+      status,
+      durationMs: Date.now() - streamStartedAt,
+      requestIndex,
+      session: {
+        sessionId: conversationId,
+        sessionTitleSnapshot: conversation?.title,
+        sessionType: 'chat',
+        channelId,
+        provider: channel.provider,
+        modelId,
+      },
+    })
+    if (record) recordUsage(record)
+  }
 
   try {
     // 7. 获取适配器
@@ -274,17 +300,17 @@ export async function sendMessage(
     let pendingToolResults = false
 
     /** 流式事件处理器（工具轮和最终响应轮复用） */
-    const handleStreamEvent = (event: { type: string; delta?: string; toolCallId?: string; toolName?: string }): void => {
+    const handleStreamEvent = (event: StreamEvent): void => {
       switch (event.type) {
         case 'chunk':
-          accumulatedContent += event.delta ?? ''
+          accumulatedContent += event.delta
           webContents.send(CHAT_IPC_CHANNELS.STREAM_CHUNK, {
             conversationId,
             delta: event.delta,
           })
           break
         case 'reasoning':
-          accumulatedReasoning += event.delta ?? ''
+          accumulatedReasoning += event.delta
           webContents.send(CHAT_IPC_CHANNELS.STREAM_REASONING, {
             conversationId,
             delta: event.delta,
@@ -300,6 +326,9 @@ export async function sendMessage(
             conversationId,
             activity: { type: 'start', toolName: event.toolName!, toolCallId: event.toolCallId! },
           })
+          break
+        case 'usage':
+          currentRequestUsage = event.usage
           break
         // done 事件在外部处理
       }
@@ -323,13 +352,16 @@ export async function sendMessage(
         continuationMessages: continuationMessages.length > 0 ? continuationMessages : undefined,
       })
 
-      const { content, reasoning, thinkingBlocks, toolCalls, stopReason } = await streamSSE({
+      requestIndex++
+      const { content, reasoning, thinkingBlocks, toolCalls, stopReason, usage } = await streamSSE({
         request,
         adapter,
         signal: controller.signal,
         fetchFn,
         onEvent: handleStreamEvent,
       })
+      recordStreamUsage(usage, 'success')
+      currentRequestUsage = undefined
 
       // 如果没有工具调用或不是 tool_use 停止，退出循环
       if (!toolCalls || toolCalls.length === 0 || stopReason !== 'tool_use') {
@@ -399,13 +431,16 @@ export async function sendMessage(
         continuationMessages,
       })
 
-      await streamSSE({
+      requestIndex++
+      const finalResult = await streamSSE({
         request: finalRequest,
         adapter,
         signal: controller.signal,
         fetchFn,
         onEvent: handleStreamEvent,
       })
+      recordStreamUsage(finalResult.usage, 'success')
+      currentRequestUsage = undefined
     }
 
     // 10. 保存 assistant 消息（空内容不保存，除非有生成的附件）
@@ -442,6 +477,7 @@ export async function sendMessage(
     // 被中止的请求：保存已输出的部分内容，通知前端停止
     if (controller.signal.aborted) {
       console.log(`[聊天服务] 对话 ${conversationId} 已被用户中止`)
+      recordStreamUsage(currentRequestUsage, 'aborted')
 
       // 保存已累积的部分助手消息
       if (accumulatedContent) {
@@ -480,6 +516,7 @@ export async function sendMessage(
 
     const errorMessage = error instanceof Error ? error.message : '未知错误'
     console.error(`[聊天服务] 流式请求失败:`, error)
+    recordStreamUsage(currentRequestUsage, 'error')
 
     // 保存已累积的部分助手消息（与 abort 逻辑一致，防止内容丢失）
     if (accumulatedContent) {

@@ -54,5 +54,8 @@ export * from './wechat'
 // 定时任务（Automation）相关类型
 export * from './automation'
 
+// Token 用量统计相关类型
+export * from './usage'
+
 // 提示词优化相关类型
 export * from './prompt-optimization'

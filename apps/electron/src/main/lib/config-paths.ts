@@ -158,6 +158,61 @@ export function getSettingsPath(): string {
 }
 
 /**
+ * 获取语音风格包配置路径
+ *
+ * @returns ~/.proma/voice-style-packs.json
+ */
+export function getVoiceStylePacksPath(): string {
+  return join(getConfigDir(), 'voice-style-packs.json')
+}
+
+/**
+ * 获取语音结构化词典配置路径
+ *
+ * @returns ~/.proma/voice-dictionary.json
+ */
+export function getVoiceDictionaryPath(): string {
+  return join(getConfigDir(), 'voice-dictionary.json')
+}
+
+/**
+ * 获取 Token 用量统计目录。
+ *
+ * @returns ~/.proma/usage/
+ */
+export function getUsageDir(): string {
+  const dir = join(getConfigDir(), 'usage')
+
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+    console.log(`[配置] 已创建用量统计目录: ${dir}`)
+  }
+
+  return dir
+}
+
+/**
+ * 获取指定月份的用量 JSONL 路径。
+ */
+export function getUsageMonthPath(month: string): string {
+  return join(getUsageDir(), `${month}.jsonl`)
+}
+
+/**
+ * 获取用量索引路径。
+ */
+export function getUsageIndexPath(): string {
+  return join(getUsageDir(), 'index.json')
+}
+
+/**
+ * 获取预算提醒状态路径。
+ */
+export function getUsageAlertStatePath(): string {
+  return join(getUsageDir(), 'alert-state.json')
+}
+
+/**
  * 获取系统默认 App 探测缓存路径
  *
  * @returns ~/.proma/default-apps.json

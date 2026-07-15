@@ -10,11 +10,13 @@
  */
 
 import * as React from 'react'
-import { Loader2, Minimize2 } from 'lucide-react'
+import { useSetAtom } from 'jotai'
+import { BarChart3, Loader2, Minimize2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { inputToolbarButtonClass } from '@/components/ai-elements/input-toolbar-styles'
 import { cn } from '@/lib/utils'
+import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 
 /** 压缩阈值比例（SDK 在 ~77.5% 窗口大小时自动压缩） */
 const COMPACT_THRESHOLD_RATIO = 0.775
@@ -130,6 +132,8 @@ export function ContextUsageBadge({
   onCompact,
   sessionId,
 }: ContextUsageBadgeProps): React.ReactElement | null {
+  const setSettingsOpen = useSetAtom(settingsOpenAtom)
+  const setSettingsTab = useSetAtom(settingsTabAtom)
   // 保留最近一次有效的 token 值，避免切换会话时闪烁消失
   const stableRef = React.useRef<{
     inputTokens: number
@@ -228,6 +232,12 @@ export function ContextUsageBadge({
     setOpen(false)
   }
 
+  const handleOpenUsage = (): void => {
+    setSettingsTab('usage')
+    setSettingsOpen(true)
+    setOpen(false)
+  }
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -288,6 +298,16 @@ export function ContextUsageBadge({
           ) : null}
 
           <div className="h-px bg-border my-0.5" />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 justify-start text-xs gap-1.5"
+            onClick={handleOpenUsage}
+          >
+            <BarChart3 className="size-3.5" />
+            查看用量历史
+          </Button>
           <Button
             type="button"
             variant={isWarning ? 'default' : 'outline'}

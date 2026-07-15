@@ -149,6 +149,21 @@ export interface StreamDoneEvent {
   stopReason?: 'end_turn' | 'tool_use' | string
 }
 
+/** 单次模型网络请求的 Token 用量 */
+export interface StreamUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheReadInputTokens?: number
+  cacheCreationInputTokens?: number
+  costUsd?: number
+}
+
+/** 流式用量事件 */
+export interface StreamUsageEvent {
+  type: 'usage'
+  usage: StreamUsage
+}
+
 /** 工具调用开始事件 */
 export interface StreamToolCallStartEvent {
   type: 'tool_call_start'
@@ -174,6 +189,7 @@ export type StreamEvent =
   | StreamReasoningBlockStopEvent
   | StreamErrorEvent
   | StreamDoneEvent
+  | StreamUsageEvent
   | StreamToolCallStartEvent
   | StreamToolCallDeltaEvent
 

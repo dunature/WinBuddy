@@ -62,6 +62,14 @@ interface OpenAIChunkData {
     }
     finish_reason?: string | null
   }>
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+    prompt_tokens_details?: {
+      cached_tokens?: number
+    }
+  } | null
 }
 
 /** OpenAI 标题响应 */
@@ -202,6 +210,10 @@ export class OpenAIAdapter implements ProviderAdapter {
       stream: true,
     }
 
+    if (this.providerType === 'openai') {
+      bodyObj.stream_options = { include_usage: true }
+    }
+
     // 工具定义
     if (input.tools && input.tools.length > 0) {
       bodyObj.tools = toOpenAITools(input.tools)
@@ -227,6 +239,20 @@ export class OpenAIAdapter implements ProviderAdapter {
       const chunk = JSON.parse(jsonLine) as OpenAIChunkData
       const delta = chunk.choices?.[0]?.delta
       const events: StreamEvent[] = []
+
+      if (chunk.usage) {
+        const cacheRead = chunk.usage.prompt_tokens_details?.cached_tokens
+        const promptTokens = chunk.usage.prompt_tokens ?? 0
+        events.push({
+          type: 'usage',
+          usage: {
+            inputTokens: cacheRead != null ? Math.max(0, promptTokens - cacheRead) : promptTokens,
+            outputTokens: chunk.usage.completion_tokens ?? 0,
+            cacheReadInputTokens: cacheRead,
+            cacheCreationInputTokens: 0,
+          },
+        })
+      }
 
       if (delta?.content) {
         events.push({ type: 'chunk', delta: delta.content })

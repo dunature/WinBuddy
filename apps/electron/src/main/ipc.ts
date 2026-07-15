@@ -9,7 +9,7 @@ import { join, resolve, sep, dirname } from 'node:path'
 import { existsSync, realpathSync, rmSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PROMPT_OPTIMIZATION_IPC_CHANNELS, isPromaPermissionMode, normalizePathForCompare } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, USAGE_IPC_CHANNELS, PROMPT_OPTIMIZATION_IPC_CHANNELS, isPromaPermissionMode, normalizePathForCompare } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
   QuickTaskSubmitInput,
@@ -22,6 +22,13 @@ import type {
   VoiceDictationStartInput,
   VoiceDictationStopInput,
   VoiceDictationTestResult,
+  VoiceDictionaryEntry,
+  VoiceDictionaryEntryInput,
+  VoicePolishCancelInput,
+  VoicePolishInput,
+  VoicePolishResult,
+  VoiceStylePack,
+  VoiceStylePackInput,
   MicPermissionResult,
 } from '../types'
 import type {
@@ -112,6 +119,12 @@ import type {
   Automation,
   CreateAutomationInput,
   UpdateAutomationInput,
+  UsageBudgetStatus,
+  UsageExportFormat,
+  UsageExportResult,
+  UsageQueryInput,
+  UsageQueryResult,
+  UsageRescanResult,
   PromptOptimizationRequest,
   PromptOptimizationCancelInput,
   OptimizedPromptResult,
@@ -155,6 +168,10 @@ import { extractTextFromAttachment } from './lib/document-parser'
 import { getTutorialContent, createWelcomeConversation } from './lib/tutorial-service'
 import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getSettings, updateSettings } from './lib/settings-service'
+import { queryUsage } from './lib/usage/usage-query-service'
+import { exportUsage } from './lib/usage/usage-export'
+import { getUsageBudgetStatus } from './lib/usage/usage-budget-service'
+import { rescanUsageHistory } from './lib/usage/usage-backfill'
 import { optimizePrompt, cancelPromptOptimization } from './lib/prompt-optimization/prompt-optimization-service'
 import { setBuiltinMcpUserEnabled } from './lib/builtin-mcp/settings'
 import { setDockBadgeCount } from './lib/dock-badge-service'
@@ -1530,6 +1547,50 @@ export function registerIpcHandlers(): void {
       win.webContents.send(SETTINGS_IPC_CHANNELS.ON_SYSTEM_THEME_CHANGED, isDark)
     })
   })
+
+  // ===== Token 用量统计 =====
+
+  ipcMain.handle(
+    USAGE_IPC_CHANNELS.QUERY,
+    async (_, input: UsageQueryInput): Promise<UsageQueryResult> => {
+      return queryUsage(input)
+    }
+  )
+
+  ipcMain.handle(
+    USAGE_IPC_CHANNELS.EXPORT,
+    async (event, input: UsageQueryInput, format: UsageExportFormat): Promise<UsageExportResult> => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const result = await dialog.showSaveDialog(win ?? BrowserWindow.getFocusedWindow()!, {
+        title: '导出用量统计',
+        defaultPath: `proma-usage.${format}`,
+        filters: [
+          format === 'csv'
+            ? { name: 'CSV 文件', extensions: ['csv'] }
+            : { name: 'JSON 文件', extensions: ['json'] },
+        ],
+      })
+      if (result.canceled || !result.filePath) {
+        return { filePath: '', recordCount: 0 }
+      }
+      const recordCount = exportUsage(input, format, result.filePath)
+      return { filePath: result.filePath, recordCount }
+    }
+  )
+
+  ipcMain.handle(
+    USAGE_IPC_CHANNELS.GET_BUDGET_STATUS,
+    async (): Promise<UsageBudgetStatus> => {
+      return getUsageBudgetStatus()
+    }
+  )
+
+  ipcMain.handle(
+    USAGE_IPC_CHANNELS.RESCAN,
+    async (): Promise<UsageRescanResult> => {
+      return rescanUsageHistory()
+    }
+  )
 
   // ===== Scratch Pad 持久化 =====
 
@@ -4143,6 +4204,71 @@ export function registerIpcHandlers(): void {
       const { getVoiceDictationSettings } = await import('./lib/voice-dictation-settings-service')
       const { commitVoiceDictationText } = await import('./lib/text-output-service')
       return commitVoiceDictationText(input.text, getVoiceDictationSettings())
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.POLISH,
+    async (_, input: VoicePolishInput): Promise<VoicePolishResult> => {
+      const { polishVoiceDictation } = await import('./lib/voice-polish-service')
+      return polishVoiceDictation(input)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.CANCEL_POLISH,
+    async (_, input: VoicePolishCancelInput): Promise<void> => {
+      const { cancelVoicePolish } = await import('./lib/voice-polish-service')
+      cancelVoicePolish(input.requestId)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.LIST_STYLE_PACKS,
+    async (): Promise<VoiceStylePack[]> => {
+      const { listVoiceStylePacks } = await import('./lib/voice-style-pack-service')
+      return listVoiceStylePacks()
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.UPSERT_STYLE_PACK,
+    async (_, input: VoiceStylePackInput): Promise<VoiceStylePack> => {
+      const { upsertVoiceStylePack } = await import('./lib/voice-style-pack-service')
+      return upsertVoiceStylePack(input)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.DELETE_STYLE_PACK,
+    async (_, id: string): Promise<void> => {
+      const { deleteVoiceStylePack } = await import('./lib/voice-style-pack-service')
+      deleteVoiceStylePack(id)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.LIST_DICTIONARY,
+    async (): Promise<VoiceDictionaryEntry[]> => {
+      const { getVoiceDictationSettings } = await import('./lib/voice-dictation-settings-service')
+      const { listVoiceDictionaryEntries } = await import('./lib/voice-dictionary-service')
+      return listVoiceDictionaryEntries(getVoiceDictationSettings().customHotwords)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.UPSERT_DICTIONARY_ENTRY,
+    async (_, input: VoiceDictionaryEntryInput): Promise<VoiceDictionaryEntry> => {
+      const { upsertVoiceDictionaryEntry } = await import('./lib/voice-dictionary-service')
+      return upsertVoiceDictionaryEntry(input)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.DELETE_DICTIONARY_ENTRY,
+    async (_, id: string): Promise<void> => {
+      const { deleteVoiceDictionaryEntry } = await import('./lib/voice-dictionary-service')
+      deleteVoiceDictionaryEntry(id)
     }
   )
 
