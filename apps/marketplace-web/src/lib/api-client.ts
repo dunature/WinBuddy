@@ -4,6 +4,7 @@ import type {
   MarketplacePaginatedResponse,
   MarketplaceSearchParams,
   MarketplaceSkillSummary,
+  MarketplaceSkillDetail,
 } from '@proma/shared'
 
 const DEFAULT_API_URL = 'http://localhost:4310/api/v1'
@@ -44,6 +45,10 @@ export class MarketplaceApiClient {
 
   listSkills(params: MarketplaceSearchParams, signal?: AbortSignal): Promise<MarketplacePaginatedResponse<MarketplaceSkillSummary>> {
     return this.get(buildMarketplaceSearchPath(params), signal)
+  }
+
+  getSkill(slug: string, signal?: AbortSignal): Promise<MarketplaceSkillDetail> {
+    return this.get(`/skills/${encodeURIComponent(slug)}`, signal)
   }
 }
 

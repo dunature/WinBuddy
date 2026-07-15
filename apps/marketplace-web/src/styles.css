@@ -37,7 +37,12 @@ button, input { font: inherit; }
   .page-button-active { @apply border-accent bg-accent text-white hover:border-accent; }
   .market-state { @apply mt-8 flex min-h-72 flex-col items-center justify-center rounded-xl border border-dashed border-line bg-panel px-6 text-center; }
   .market-action { @apply mt-5 h-10 rounded-lg bg-ink px-5 text-sm font-medium text-white transition hover:bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent; }
+  .detail-tab { @apply h-10 flex-1 rounded-lg text-sm text-muted transition hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent; }
+  .detail-tab-active { @apply bg-accent font-medium text-white shadow-sm hover:text-white; }
 }
+
+.guide-content > :first-child { margin-top: 0; }
+.guide-content > :last-child { margin-bottom: 0; }
 
 .skip-link {
   position: fixed;
