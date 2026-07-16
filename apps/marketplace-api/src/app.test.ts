@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { MarketplaceApiError } from '@proma/shared'
 import { createMarketplaceApp } from './app.ts'
 import { loadMarketplaceApiConfig } from './config.ts'
+import { AdminAuthService } from './auth/admin-auth.ts'
 
 const TEST_ENV = {
   MARKETPLACE_DATABASE_URL: 'postgres://localhost/test',
@@ -32,5 +33,20 @@ describe('Marketplace API foundation', () => {
 
   test('缺少配置时给出中文错误', () => {
     expect(() => loadMarketplaceApiConfig({ NODE_ENV: 'test' })).toThrow('Marketplace API 配置无效')
+  })
+
+  test('admin=false 时不注册管理认证路由', async () => {
+    const auth = new AdminAuthService({
+      findEnabledUser: async () => undefined,
+      createSession: async () => undefined,
+      findSession: async () => undefined,
+      deleteSession: async () => undefined,
+    }, {
+      getAuthorizeUrl: () => 'https://github.com/login/oauth/authorize',
+      exchange: async () => ({ login: 'test', name: 'Test' }),
+    }, 'test-secret-that-is-long-enough-for-hmac')
+    const app = createMarketplaceApp({ config: loadMarketplaceApiConfig(TEST_ENV), adminAuth: auth })
+    expect((await app.request('/api/v1/admin/auth/session')).status).toBe(404)
+    expect(await (await app.request('/api/v1/features')).json()).toEqual({ browse: false, install: false, admin: false, community: false })
   })
 })

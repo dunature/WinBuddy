@@ -23,19 +23,22 @@ import { MarketplaceInstallDialog } from './MarketplaceInstallDialog'
 interface MarketplaceBrowserProps {
   apiUrl?: string
   workspaceSlug: string
+  installEnabled: boolean
+  communityEnabled: boolean
   onBack: () => void
 }
 
-export function MarketplaceBrowser({ apiUrl, workspaceSlug, onBack }: MarketplaceBrowserProps): React.ReactElement {
+export function MarketplaceBrowser({ apiUrl, workspaceSlug, installEnabled, communityEnabled, onBack }: MarketplaceBrowserProps): React.ReactElement {
   const api = React.useMemo(() => new ElectronMarketplaceApi(apiUrl), [apiUrl])
   const [selectedSlug, setSelectedSlug] = useAtom(marketplaceSelectedSlugAtom)
   const setUpdates = useSetAtom(marketplaceAvailableUpdatesAtom)
 
   React.useEffect(() => {
     let active = true
+    if (!installEnabled) return
     window.electronAPI.checkMarketplaceUpdates({ workspaceSlug }).then((updates) => { if (active) setUpdates(updates) }).catch((error: unknown) => console.warn('[社区市场] 更新检查失败:', error))
     return () => { active = false }
-  }, [setUpdates, workspaceSlug])
+  }, [installEnabled, setUpdates, workspaceSlug])
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -48,15 +51,15 @@ export function MarketplaceBrowser({ apiUrl, workspaceSlug, onBack }: Marketplac
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
         {selectedSlug
-          ? <MarketplaceDetail api={api} slug={selectedSlug} />
-          : <MarketplaceList api={api} onSelect={setSelectedSlug} />}
+          ? <MarketplaceDetail api={api} slug={selectedSlug} installEnabled={installEnabled} />
+          : <MarketplaceList api={api} communityEnabled={communityEnabled} onSelect={setSelectedSlug} />}
       </div>
-      <MarketplaceInstallDialog api={api} workspaceSlug={workspaceSlug} />
+      {installEnabled && <MarketplaceInstallDialog api={api} workspaceSlug={workspaceSlug} />}
     </div>
   )
 }
 
-function MarketplaceList({ api, onSelect }: { api: ElectronMarketplaceApi; onSelect: (slug: string) => void }): React.ReactElement {
+function MarketplaceList({ api, communityEnabled, onSelect }: { api: ElectronMarketplaceApi; communityEnabled: boolean; onSelect: (slug: string) => void }): React.ReactElement {
   const [query, setQuery] = useAtom(marketplaceQueryAtom)
   const [scope, setScope] = useAtom(marketplaceScopeAtom)
   const [category, setCategory] = useAtom(marketplaceCategoryAtom)
@@ -66,6 +69,10 @@ function MarketplaceList({ api, onSelect }: { api: ElectronMarketplaceApi; onSel
   const [skills, setSkills] = React.useState<MarketplaceSkillSummary[] | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const deferredQuery = React.useDeferredValue(query.trim())
+
+  React.useEffect(() => {
+    if (!communityEnabled && scope !== 'official') setScope('official')
+  }, [communityEnabled, scope, setScope])
 
   React.useEffect(() => {
     const controller = new AbortController()
@@ -89,7 +96,7 @@ function MarketplaceList({ api, onSelect }: { api: ElectronMarketplaceApi; onSel
     <div className="mx-auto w-full max-w-6xl px-8 pb-10">
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex h-9 min-w-64 flex-1 items-center gap-2 rounded-xl bg-muted px-3 focus-within:ring-2 focus-within:ring-primary/30"><Search size={15} className="text-muted-foreground" /><input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-sm outline-none" placeholder="搜索 Skills、用途或作者..." /></label>
-        <select value={scope} onChange={(event) => setScope(event.target.value as typeof scope)} className="h-9 rounded-xl border border-border bg-background px-3 text-sm"><option value="all">全部来源</option><option value="official">官方</option><option value="community">社区</option></select>
+        {communityEnabled && <select value={scope} onChange={(event) => setScope(event.target.value as typeof scope)} className="h-9 rounded-xl border border-border bg-background px-3 text-sm"><option value="all">全部来源</option><option value="official">官方</option><option value="community">社区</option></select>}
         <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)} className="h-9 rounded-xl border border-border bg-background px-3 text-sm"><option value="popular">最受欢迎</option><option value="recent">最近更新</option></select>
       </div>
       <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
@@ -112,7 +119,7 @@ function SkillMarketCard({ skill, hasUpdate, onClick }: { skill: MarketplaceSkil
   return <button type="button" onClick={onClick} className="group rounded-2xl bg-card p-5 text-left shadow-sm ring-1 ring-border/50 transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><div className="flex items-start justify-between gap-3"><div className="grid size-11 place-items-center rounded-xl bg-orange-500/10 text-orange-600"><Blocks size={21} /></div><div className="flex gap-1">{hasUpdate && <span className="rounded-full bg-blue-500/10 px-2 py-1 text-[10px] font-medium text-blue-700">可更新</span>}{skill.author.official && <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-700">官方</span>}</div></div><h2 className="mt-4 font-semibold">{skill.displayName}</h2><p className="mt-1 line-clamp-2 min-h-10 text-xs leading-5 text-muted-foreground">{skill.description}</p><div className="mt-4 flex items-center justify-between text-[11px] text-muted-foreground"><span>@{skill.author.handle} · v{skill.version}</span><span>{skill.installCount.toLocaleString()} 次安装</span></div></button>
 }
 
-function MarketplaceDetail({ api, slug }: { api: ElectronMarketplaceApi; slug: string }): React.ReactElement {
+function MarketplaceDetail({ api, slug, installEnabled }: { api: ElectronMarketplaceApi; slug: string; installEnabled: boolean }): React.ReactElement {
   const [detail, setDetail] = React.useState<MarketplaceSkillDetail | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [tab, setTab] = useAtom(marketplaceDetailTabAtom)
@@ -132,7 +139,7 @@ function MarketplaceDetail({ api, slug }: { api: ElectronMarketplaceApi; slug: s
   if (error) return <MarketplaceState icon={<Store />} title="无法加载 Skill" description={error} />
   if (!detail) return <MarketplaceState icon={<Loader2 className="animate-spin" />} title="正在加载详情" description="正在读取指南与权限信息。" />
 
-  return <div className="mx-auto w-full max-w-6xl px-8 pb-10"><div className="flex flex-wrap items-start justify-between gap-5 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border/50"><div><div className="flex items-center gap-3"><div className="grid size-12 place-items-center rounded-xl bg-orange-500/10 text-orange-600"><Blocks size={24} /></div><div><h2 className="text-2xl font-semibold">{detail.displayName}</h2><p className="mt-1 text-xs text-muted-foreground">@{detail.author.handle} · v{detail.version} · {detail.installCount.toLocaleString()} 次安装</p></div></div><p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground">{detail.description}</p></div><button type="button" onClick={() => setPendingInstall(detail.slug)} className="rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">{update ? `更新到 v${update.latestVersion.version}` : '安装到当前工作区'}</button></div>{update?.latestVersion.changelog && <div className="mt-4 rounded-xl bg-blue-500/10 p-4 text-sm"><p className="font-medium text-blue-800">v{update.currentVersion} → v{update.latestVersion.version}</p><p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-blue-800/75">{update.latestVersion.changelog}</p></div>}<div className="mt-5 flex rounded-xl bg-muted p-1">{(['guide', 'files', 'examples'] as const).map((value) => <button type="button" key={value} onClick={() => setTab(value)} className={cn('flex-1 rounded-lg py-2 text-sm transition', tab === value ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground')}>{value === 'guide' ? '指南' : value === 'files' ? '文件' : '运行案例'}</button>)}</div>{tab === 'guide' ? <Guide detail={detail} /> : tab === 'files' ? <MarketplaceFiles api={api} detail={detail} /> : <MarketplaceExamples api={api} detail={detail} />}</div>
+  return <div className="mx-auto w-full max-w-6xl px-8 pb-10"><div className="flex flex-wrap items-start justify-between gap-5 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border/50"><div><div className="flex items-center gap-3"><div className="grid size-12 place-items-center rounded-xl bg-orange-500/10 text-orange-600"><Blocks size={24} /></div><div><h2 className="text-2xl font-semibold">{detail.displayName}</h2><p className="mt-1 text-xs text-muted-foreground">@{detail.author.handle} · v{detail.version} · {detail.installCount.toLocaleString()} 次安装</p></div></div><p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground">{detail.description}</p></div><button type="button" disabled={!installEnabled} onClick={() => setPendingInstall(detail.slug)} className="rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50">{installEnabled ? (update ? `更新到 v${update.latestVersion.version}` : '安装到当前工作区') : '安装功能暂未开放'}</button></div>{update?.latestVersion.changelog && <div className="mt-4 rounded-xl bg-blue-500/10 p-4 text-sm"><p className="font-medium text-blue-800">v{update.currentVersion} → v{update.latestVersion.version}</p><p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-blue-800/75">{update.latestVersion.changelog}</p></div>}<div className="mt-5 flex rounded-xl bg-muted p-1">{(['guide', 'files', 'examples'] as const).map((value) => <button type="button" key={value} onClick={() => setTab(value)} className={cn('flex-1 rounded-lg py-2 text-sm transition', tab === value ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground')}>{value === 'guide' ? '指南' : value === 'files' ? '文件' : '运行案例'}</button>)}</div>{tab === 'guide' ? <Guide detail={detail} /> : tab === 'files' ? <MarketplaceFiles api={api} detail={detail} /> : <MarketplaceExamples api={api} detail={detail} />}</div>
 }
 
 function Guide({ detail }: { detail: MarketplaceSkillDetail }): React.ReactElement {

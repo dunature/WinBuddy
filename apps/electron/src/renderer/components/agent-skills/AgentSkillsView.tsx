@@ -37,6 +37,7 @@ import { ImportSkillDialog } from './ImportSkillDialog'
 import { WorkspaceMemoryTab } from './WorkspaceMemoryTab'
 import { groupSkills } from './skillGrouping'
 import { MarketplaceBrowser } from './MarketplaceBrowser'
+import { ElectronMarketplaceApi } from '@/lib/marketplace-api'
 
 function buildSkillClassificationPrompt(input: {
   workspaceName: string
@@ -99,7 +100,7 @@ export function AgentSkillsView(): React.ReactElement {
   const [tab, setTab] = useAtom(agentSkillsTabAtom)
   const [surface, setSurface] = useAtom(agentSkillsSurfaceAtom)
   const [search, setSearch] = React.useState('')
-  const [marketplaceConfig, setMarketplaceConfig] = React.useState<{ enabled: boolean; apiUrl?: string }>({ enabled: false })
+  const [marketplaceConfig, setMarketplaceConfig] = React.useState<{ browse: boolean; install: boolean; community: boolean; apiUrl?: string }>({ browse: false, install: false, community: false })
   const [selectedSkillSlug, setSelectedSkillSlug] = React.useState<string | null>(null)
   const [mcpSheetOpen, setMcpSheetOpen] = React.useState(false)
   const [editingMcp, setEditingMcp] = React.useState<{ name: string; entry: McpServerEntry } | null>(null)
@@ -114,10 +115,19 @@ export function AgentSkillsView(): React.ReactElement {
 
   React.useEffect(() => {
     let active = true
-    window.electronAPI.getSettings().then((settings) => {
-      if (active) setMarketplaceConfig({ enabled: settings.marketplaceEnabled === true, apiUrl: settings.marketplaceApiUrl })
+    const controller = new AbortController()
+    window.electronAPI.getSettings().then(async (settings) => {
+      const localBrowse = settings.marketplaceBrowseEnabled === true
+      if (!localBrowse) return
+      const features = await new ElectronMarketplaceApi(settings.marketplaceApiUrl).getFeatures(controller.signal)
+      if (active) setMarketplaceConfig({
+        browse: localBrowse && features.browse,
+        install: settings.marketplaceInstallEnabled === true && features.install,
+        community: settings.marketplaceCommunityEnabled === true && features.community,
+        apiUrl: settings.marketplaceApiUrl,
+      })
     }).catch((error: unknown) => console.error('[社区市场] 读取内部配置失败:', error))
-    return () => { active = false }
+    return () => { active = false; controller.abort() }
   }, [])
 
   const q = search.trim().toLowerCase()
@@ -223,8 +233,8 @@ export function AgentSkillsView(): React.ReactElement {
     )
   }
 
-  if (surface === 'marketplace' && marketplaceConfig.enabled) {
-    return <MarketplaceBrowser apiUrl={marketplaceConfig.apiUrl} workspaceSlug={data.workspaceSlug} onBack={() => setSurface('library')} />
+  if (surface === 'marketplace' && marketplaceConfig.browse) {
+    return <MarketplaceBrowser apiUrl={marketplaceConfig.apiUrl} workspaceSlug={data.workspaceSlug} installEnabled={marketplaceConfig.install} communityEnabled={marketplaceConfig.community} onBack={() => setSurface('library')} />
   }
 
   return (
@@ -325,7 +335,7 @@ export function AgentSkillsView(): React.ReactElement {
             <TooltipTrigger asChild>
               <button
                 type="button"
-                disabled={!marketplaceConfig.enabled}
+                disabled={!marketplaceConfig.browse}
                 onClick={() => setSurface('marketplace')}
                 className="flex h-8 items-center gap-1.5 rounded-lg border border-border/60 bg-content-area px-3 text-[13px] font-medium text-foreground/80 shadow-sm transition-colors hover:bg-foreground/[0.04] disabled:cursor-not-allowed disabled:border-dashed disabled:bg-transparent disabled:text-foreground/35 disabled:shadow-none"
               >
@@ -333,7 +343,7 @@ export function AgentSkillsView(): React.ReactElement {
                 <span>社区市场</span>
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">{marketplaceConfig.enabled ? '浏览经过审核的社区 Skills' : '内部功能：通过 Release Gate 后开放'}</TooltipContent>
+            <TooltipContent side="bottom">{marketplaceConfig.browse ? '浏览经过审核的 Marketplace Skills' : '内部功能：通过 Release Gate 后开放'}</TooltipContent>
           </Tooltip>
         )}
 

@@ -37,6 +37,7 @@ export type MarketplaceErrorCode =
   | 'UPLOAD_FAILED'
   | 'REVIEW_REASON_REQUIRED'
   | 'PUBLISH_FAILED'
+  | 'FEATURE_DISABLED'
   | 'INTERNAL_ERROR'
 
 export interface MarketplaceAuthor {

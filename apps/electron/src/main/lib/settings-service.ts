@@ -34,7 +34,11 @@ export function getSettings(): AppSettings {
 
   try {
     const raw = readFileSync(filePath, 'utf-8')
-    const data = JSON.parse(raw) as Partial<AppSettings>
+    const parsed = JSON.parse(raw) as Partial<AppSettings>
+    const data = migrateLegacyMarketplaceSettings(parsed)
+    if (data !== parsed) {
+      writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
+    }
     return {
       ...data,
       themeMode: data.themeMode || DEFAULT_THEME_MODE,
@@ -60,6 +64,18 @@ export function getSettings(): AppSettings {
       feishuSessionMirror: { mode: 'off' },
       builtinMcpDisabledIds: [],
     }
+  }
+}
+
+/** 旧总开关只迁移一次，且不会自动开放社区内容。 */
+export function migrateLegacyMarketplaceSettings(settings: Partial<AppSettings>): Partial<AppSettings> {
+  if (settings.marketplaceEnabled !== true) return settings
+  if (settings.marketplaceBrowseEnabled !== undefined || settings.marketplaceInstallEnabled !== undefined) return settings
+  return {
+    ...settings,
+    marketplaceBrowseEnabled: true,
+    marketplaceInstallEnabled: true,
+    marketplaceCommunityEnabled: settings.marketplaceCommunityEnabled ?? false,
   }
 }
 

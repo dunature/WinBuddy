@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
-import type { MarketplaceSkillDetail } from '@proma/shared'
+import type { MarketplacePaginatedResponse, MarketplaceSkillDetail, MarketplaceSkillSummary } from '@proma/shared'
 import { createMarketplaceApp } from '../app.ts'
 import { loadMarketplaceApiConfig } from '../config.ts'
 import { MemoryMarketplaceObjectStore } from '../object-store/memory-object-store.ts'
@@ -71,6 +71,9 @@ const config = loadMarketplaceApiConfig({
   MARKETPLACE_OBJECT_REGION: 'test-region',
   MARKETPLACE_OBJECT_ACCESS_KEY_ID: 'test-access-key',
   MARKETPLACE_OBJECT_SECRET_ACCESS_KEY: 'test-secret-key',
+  MARKETPLACE_FEATURE_BROWSE: 'true',
+  MARKETPLACE_FEATURE_INSTALL: 'true',
+  MARKETPLACE_FEATURE_COMMUNITY: 'true',
   NODE_ENV: 'test',
 })
 
@@ -91,6 +94,20 @@ function app() {
 }
 
 describe('Marketplace public routes', () => {
+  test('Feature Flag 在服务端阻止浏览、安装并隔离社区内容', async () => {
+    const disabled = createMarketplaceApp({
+      config: { ...config, features: { browse: false, install: false, admin: false, community: false } },
+      services: { repository, objectStore },
+    })
+    expect((await disabled.request('/api/v1/skills')).status).toBe(503)
+    const officialOnly = createMarketplaceApp({
+      config: { ...config, features: { browse: true, install: false, admin: false, community: false } },
+      services: { repository, objectStore },
+    })
+    const list = await (await officialOnly.request('/api/v1/skills?scope=all')).json() as MarketplacePaginatedResponse<MarketplaceSkillSummary>
+    expect(list.items.every((item) => item.author.official)).toBe(true)
+    expect((await officialOnly.request('/api/v1/skills/deep-research/versions/1.0.0/package')).status).toBe(503)
+  })
   test('列表支持 scope、关键词、分类和分页', async () => {
     const response = await app().request('/api/v1/skills?scope=official&query=深度&category=research&page=1&pageSize=1')
     const body = await response.json() as { items: MarketplaceSkillDetail[]; total: number }

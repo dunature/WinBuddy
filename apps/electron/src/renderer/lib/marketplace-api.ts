@@ -2,6 +2,7 @@ import type {
   MarketplaceApiError,
   MarketplaceCategory,
   MarketplaceExample,
+  MarketplaceFeatureFlags,
   MarketplaceFileContent,
   MarketplaceFileNode,
   MarketplacePaginatedResponse,
@@ -48,6 +49,10 @@ export class ElectronMarketplaceApi {
 
   listCategories(signal?: AbortSignal): Promise<MarketplaceCategory[]> {
     return this.get('/categories', signal)
+  }
+
+  getFeatures(signal?: AbortSignal): Promise<MarketplaceFeatureFlags> {
+    return this.get('/features', signal)
   }
 
   listSkills(params: MarketplaceSearchParams, signal?: AbortSignal): Promise<MarketplacePaginatedResponse<MarketplaceSkillSummary>> {

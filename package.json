@@ -1,6 +1,6 @@
 {
   "name": "proma",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The next gen ai software with general agents",
   "type": "module",
   "private": true,
@@ -15,15 +15,18 @@
     "electron:start": "bun run --filter='@proma/electron' start",
     "build": "bun run --filter='*' build",
     "typecheck": "bun run --filter='*' typecheck",
-    "test": "bun test"
-    ,"marketplace:content:validate": "bun marketplace-content/validate.ts"
+    "test": "bun test",
+    "marketplace:content:package": "bun marketplace-content/package.ts",
+    "marketplace:content:validate": "bun marketplace-content/validate.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/adm-zip": "0.5.8",
     "@types/dompurify": "^3.2.0",
     "@types/node": "^20.0.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
+    "adm-zip": "0.5.17",
     "dompurify": "^3.4.2",
     "typescript": "^5.0.0"
   },

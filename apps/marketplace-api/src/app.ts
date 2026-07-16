@@ -41,7 +41,7 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
   }))
   app.get('/api/v1/features', (context) => context.json(options.config.features))
 
-  if (options.services) app.route('/api/v1', createMarketplacePublicRoutes(options.services))
+  if (options.services) app.route('/api/v1', createMarketplacePublicRoutes(options.services, options.config.features))
   if (options.adminAuth && options.config.adminEnabled) {
     app.route('/api/v1/admin/auth', createAdminAuthRoutes(options.adminAuth, options.config.webUrl, options.config.environment === 'production'))
     if (options.submissions) app.route('/api/v1/admin/submissions', createAdminSubmissionRoutes(options.adminAuth, options.submissions))

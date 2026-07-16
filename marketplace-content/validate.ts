@@ -1,4 +1,25 @@
-import { parseSkillManifest } from '@proma/marketplace-domain';import { marketplaceContentCatalog } from './catalog.ts'
-const allowed=new Set(['research','productivity','content','design','data-ai','devops','writing']);let failures=0
-for(const entry of marketplaceContentCatalog){const examples=entry.prompts.map((prompt,index)=>({title:`${entry.name}案例 ${index+1}`,summary:prompt,userRequest:prompt,steps:entry.workflow.map((step)=>({title:step,summary:'按输入材料执行并保留可验证依据'})),finalOutputMarkdown:`# ${entry.name}结果\n\n输出结论、依据、限制与下一步。`,assetUrls:[]}));const skill=`---\nschema_version: 1\nname: ${entry.slug}\ndisplay_name: ${entry.name}\ndescription: ${entry.benefit}，适用于需要稳定流程和明确交付标准的任务。\nversion: 1.0.0\nauthor:\n  handle: proma-editor\n  name: Proma 编辑部\ncategory: ${entry.category}\nlicense: MIT\npermissions:\n  network: false\n  shell: false\n  filesystem:\n    read: true\n    write: output-only\ntags: [${entry.priority.toLowerCase()}, curated]\n---\n# ${entry.name}\n\n## 适用场景\n${entry.benefit}。\n\n## 不适用场景\n不得用于绕过授权、伪造来源或处理未获许可的敏感信息。\n\n## 工作流程\n${entry.workflow.map((step,index)=>`${index+1}. ${step}`).join('\n')}\n\n## 输出要求\n给出结果、依据、限制和下一步，不展示隐藏思维链。`;const parsed=parseSkillManifest(skill);if(!allowed.has(entry.category)||parsed.issues.some(issue=>issue.severity==='error')||(entry.priority==='P0'&&examples.length!==3)||examples.length<1){failures++;console.error(`[内容校验失败] ${entry.slug}`,parsed.issues)}}
-if(marketplaceContentCatalog.length!==15||failures)throw new Error(`Marketplace 内容校验失败：${failures}`);console.log('Marketplace 15 个首发 Skill 内容校验通过')
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { validateSubmissionPackage } from '../apps/marketplace-api/src/validation/validation-runner.ts'
+import { marketplaceContentCatalog } from './catalog.ts'
+import { buildMarketplaceContentPackages } from './package.ts'
+
+const temporaryDirectory = mkdtempSync(join(tmpdir(), 'proma-marketplace-content-validation-'))
+
+try {
+  const packages = buildMarketplaceContentPackages(temporaryDirectory)
+  const failures: string[] = []
+  for (const candidate of packages) {
+    const result = await validateSubmissionPackage(readFileSync(candidate.zipPath))
+    const errors = result.issues.filter((issue) => issue.severity === 'error')
+    const entry = marketplaceContentCatalog.find((item) => item.slug === candidate.slug)
+    if (errors.length > 0 || !entry || candidate.exampleCount < 1 || (entry.priority === 'P0' && candidate.exampleCount !== 3)) {
+      failures.push(`${candidate.slug}: ${errors.map((issue) => issue.code).join(', ') || '案例数量不符合要求'}`)
+    }
+  }
+  if (packages.length !== 15 || failures.length > 0) throw new Error(`Marketplace 内容校验失败：${failures.join('; ')}`)
+  console.log('Marketplace 15 个真实首发包已通过线上同源 Validator')
+} finally {
+  rmSync(temporaryDirectory, { recursive: true, force: true })
+}

@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
-import type { MarketplaceInstallEventInput, MarketplacePackageDownload } from '@proma/shared'
+import type { MarketplaceFeatureFlags, MarketplaceInstallEventInput, MarketplacePackageDownload } from '@proma/shared'
 import { MarketplaceApiException } from '../errors.ts'
 import type { MarketplaceObjectStore } from '../object-store/object-store.ts'
 import type { MarketplaceRepository } from '../repository/marketplace-repository.ts'
@@ -29,20 +29,30 @@ const installEventSchema = z.object({
   appVersion: z.string().min(1).max(64),
 })
 
-export function createMarketplacePublicRoutes(services: MarketplacePublicRouteServices): Hono {
+const ENABLED_FLAGS: MarketplaceFeatureFlags = { browse: true, install: true, admin: true, community: true }
+
+export function createMarketplacePublicRoutes(services: MarketplacePublicRouteServices, flags: MarketplaceFeatureFlags = ENABLED_FLAGS): Hono {
   const routes = new Hono()
+
+  routes.use('*', async (context, next) => {
+    if (context.req.path.includes('/categories') || context.req.path.includes('/skills')) requireFeature(flags.browse, '公共市场浏览暂未开放')
+    if (context.req.path.endsWith('/package')) requireFeature(flags.install, '市场安装暂未开放')
+    await next()
+  })
 
   routes.get('/categories', async (context) => context.json(await services.repository.listCategories()))
 
   routes.get('/skills', async (context) => {
     const parsed = searchSchema.safeParse(context.req.query())
     if (!parsed.success) throw new MarketplaceApiException('VALIDATION_FAILED', '市场筛选参数无效', 400, { issues: parsed.error.issues })
-    return context.json(await services.repository.listSkills(parsed.data))
+    const scope = flags.community ? parsed.data.scope : 'official'
+    return context.json(await services.repository.listSkills({ ...parsed.data, scope }))
   })
 
   routes.get('/skills/:slug', async (context) => {
     const skill = await services.repository.getSkill(context.req.param('slug'))
     if (!skill) throw new MarketplaceApiException('SKILL_NOT_FOUND', 'Skill 不存在或尚未公开', 404)
+    if (!flags.community && !skill.author.official) throw new MarketplaceApiException('SKILL_NOT_FOUND', 'Skill 不存在或尚未公开', 404)
     return context.json(skill)
   })
 
@@ -93,4 +103,8 @@ export function createMarketplacePublicRoutes(services: MarketplacePublicRouteSe
   })
 
   return routes
+}
+
+function requireFeature(enabled: boolean, message: string): void {
+  if (!enabled) throw new MarketplaceApiException('FEATURE_DISABLED', message, 503)
 }
