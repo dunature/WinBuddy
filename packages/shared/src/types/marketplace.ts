@@ -232,3 +232,6 @@ export interface MarketplaceSubmissionDetail extends MarketplaceSubmissionSummar
 
 export interface MarketplaceReviewDecisionInput { decision: 'approve' | 'reject'; reason?: string }
 export interface MarketplaceReviewResult { submissionId: string; status: MarketplaceSubmissionStatus; publishedVersionId?: string }
+export interface MarketplaceAdminSkillSummary { id: string; slug: string; displayName: string; authorHandle: string; category: string; version: string; status: MarketplaceSkillStatus; installCount: number; updatedAt: string }
+export interface MarketplaceAdminVersionSummary { id: string; version: string; status: MarketplaceSkillStatus; sha256: string; createdAt: string; publishedAt?: string }
+export interface MarketplaceAuditEntry { id: string; actor: string; action: string; skillId?: string; details?: Record<string, unknown>; createdAt: string }

@@ -50,7 +50,7 @@ export class SubmissionService {
 }
 
 export class SubmissionError extends Error {
-  constructor(readonly code: 'PACKAGE_TOO_LARGE' | 'VALIDATION_FAILED' | 'SUBMISSION_NOT_FOUND' | 'ADMIN_ACCESS_DENIED' | 'SUBMISSION_STATE_CONFLICT' | 'UPLOAD_FAILED' | 'PACKAGE_HASH_MISMATCH' | 'REVIEW_REASON_REQUIRED' | 'PUBLISH_FAILED', message: string, readonly status: number) { super(message) }
+  constructor(readonly code: 'PACKAGE_TOO_LARGE' | 'VALIDATION_FAILED' | 'SUBMISSION_NOT_FOUND' | 'SKILL_NOT_FOUND' | 'ADMIN_ACCESS_DENIED' | 'SUBMISSION_STATE_CONFLICT' | 'UPLOAD_FAILED' | 'PACKAGE_HASH_MISMATCH' | 'REVIEW_REASON_REQUIRED' | 'PUBLISH_FAILED', message: string, readonly status: number) { super(message) }
 }
 
 interface SubmissionRow { id: string; object_key: string; file_name: string; package_size: number; sha256: string | null; status: MarketplaceSubmissionStatus; submitted_by: string; created_at: Date; updated_at: Date; manifest: unknown; guide_markdown: string | null; extracted_files: unknown; extracted_examples: unknown }

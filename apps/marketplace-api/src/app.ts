@@ -11,6 +11,8 @@ import type { SubmissionService } from './submissions/submission-service.ts'
 import { createAdminSubmissionRoutes } from './routes/admin-submission-routes.ts'
 import type { PostgresReviewService } from './reviews/review-service.ts'
 import { createAdminReviewRoutes } from './routes/admin-review-routes.ts'
+import type { AdminManagementService } from './management/admin-management-service.ts'
+import { createAdminManagementRoutes } from './routes/admin-management-routes.ts'
 
 export interface CreateMarketplaceAppOptions {
   config: MarketplaceApiConfig
@@ -19,6 +21,7 @@ export interface CreateMarketplaceAppOptions {
   adminAuth?: AdminAuthService
   submissions?: SubmissionService
   reviews?: PostgresReviewService
+  management?: AdminManagementService
 }
 
 export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono {
@@ -42,6 +45,7 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
     app.route('/api/v1/admin/auth', createAdminAuthRoutes(options.adminAuth, options.config.webUrl, options.config.environment === 'production'))
     if (options.submissions) app.route('/api/v1/admin/submissions', createAdminSubmissionRoutes(options.adminAuth, options.submissions))
     if (options.reviews) app.route('/api/v1/admin/submissions', createAdminReviewRoutes(options.adminAuth, options.reviews))
+    if (options.management) app.route('/api/v1/admin', createAdminManagementRoutes(options.adminAuth, options.management))
   }
 
   app.notFound((context) => context.json<MarketplaceApiError>({

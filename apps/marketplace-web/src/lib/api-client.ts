@@ -15,6 +15,9 @@ import type {
   MarketplaceSubmissionSummary,
   MarketplaceReviewDecisionInput,
   MarketplaceReviewResult,
+  MarketplaceAdminSkillSummary,
+  MarketplaceAdminVersionSummary,
+  MarketplaceAuditEntry,
 } from '@proma/shared'
 
 const DEFAULT_API_URL = 'http://localhost:4310/api/v1'
@@ -66,6 +69,10 @@ export class MarketplaceApiClient {
   createSubmission(input: MarketplaceCreateSubmissionInput): Promise<MarketplaceCreateSubmissionResult> { return this.post('/admin/submissions', input) }
   completeSubmission(id: string, sha256: string): Promise<MarketplaceSubmissionSummary> { return this.post(`/admin/submissions/${encodeURIComponent(id)}/complete`, { sha256 }) }
   decideSubmission(id: string, input: MarketplaceReviewDecisionInput): Promise<MarketplaceReviewResult> { return this.post(`/admin/submissions/${encodeURIComponent(id)}/decision`, input) }
+  listAdminSkills(query = ''): Promise<MarketplaceAdminSkillSummary[]> { return this.get(`/admin/skills${query ? `?query=${encodeURIComponent(query)}` : ''}`) }
+  listAdminVersions(id: string): Promise<MarketplaceAdminVersionSummary[]> { return this.get(`/admin/skills/${encodeURIComponent(id)}/versions`) }
+  updateSkillLifecycle(id: string, action: 'unlist' | 'republish' | 'archive', reason: string): Promise<{ ok: boolean }> { return this.post(`/admin/skills/${encodeURIComponent(id)}/lifecycle`, { action, reason }) }
+  listAudit(skillId?: string): Promise<MarketplaceAuditEntry[]> { return this.get(`/admin/audit${skillId ? `?skillId=${encodeURIComponent(skillId)}` : ''}`) }
 
   listCategories(signal?: AbortSignal): Promise<MarketplaceCategory[]> {
     return this.get('/categories', signal)
