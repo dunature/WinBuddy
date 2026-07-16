@@ -36,11 +36,15 @@ describe('validateMarketplacePackageEntries', () => {
       entry('scripts/link', { isSymbolicLink: true }),
       entry('.git/config'),
       entry('templates/CON.txt'),
+      entry('templates/trailing-dot.'),
+      entry('templates/stream:name.txt'),
     ])
     expect(result.issues.map((item) => item.code)).toEqual([
       'PACKAGE_SYMLINK_UNSAFE',
       'PACKAGE_PATH_BLOCKED',
       'PACKAGE_WINDOWS_RESERVED_PATH',
+      'PACKAGE_WINDOWS_UNSAFE_PATH',
+      'PACKAGE_WINDOWS_UNSAFE_PATH',
     ])
   })
 

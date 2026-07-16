@@ -4,8 +4,8 @@ import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import yauzl, { type Entry, type ZipFile } from 'yauzl'
-import { parseSkillManifest, validateMarketplacePackageEntries, type MarketplacePackageEntry } from '@proma/marketplace-domain'
-import type { MarketplaceCreateInstallInput, MarketplaceCreateInstallResult, MarketplaceInstallError, MarketplaceInstallEventInput, MarketplaceInstallState, MarketplacePackageDownload, MarketplacePermissionSet, MarketplaceResolveConflictInput, MarketplaceSkillSource } from '@proma/shared'
+import { isValidMarketplaceVersion, parseSkillManifest, validateMarketplacePackageEntries, type MarketplacePackageEntry } from '@proma/marketplace-domain'
+import { formatMarketplaceLog, type MarketplaceCreateInstallInput, type MarketplaceCreateInstallResult, type MarketplaceInstallError, type MarketplaceInstallEventInput, type MarketplaceInstallState, type MarketplacePackageDownload, type MarketplacePermissionSet, type MarketplaceResolveConflictInput, type MarketplaceSkillSource } from '@proma/shared'
 import { getAgentWorkspacePath, getMarketplaceInstallsTempDir, getWorkspaceSkillsDir } from './config-paths'
 import { listAgentWorkspaces } from './agent-workspace-manager'
 import { getSettings } from './settings-service'
@@ -39,6 +39,8 @@ const sessions = new Map<string, MarketplaceInstallerSession>()
 export function createMarketplaceInstall(input: MarketplaceCreateInstallInput): MarketplaceCreateInstallResult {
   assertSafeIdentifier(input.slug, 'Skill slug')
   assertSafeIdentifier(input.workspaceSlug, '工作区 slug')
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,99}$/.test(input.skillId)) throw installerError('VALIDATION_FAILED', '市场 Skill ID 格式无效')
+  if (!isValidMarketplaceVersion(input.version)) throw installerError('VALIDATION_FAILED', '市场 Skill 版本格式无效')
   if (!listAgentWorkspaces().some((workspace) => workspace.slug === input.workspaceSlug)) throw installerError('WORKSPACE_NOT_FOUND', '目标工作区不存在')
   const installId = randomUUID()
   const tempDir = join(getMarketplaceInstallsTempDir(), installId)
@@ -174,7 +176,9 @@ async function fetchWithRedirectLimit(url: string, signal: AbortSignal): Promise
     if (![301, 302, 303, 307, 308].includes(response.status)) return response
     const location = response.headers.get('location')
     if (!location || redirects === MAX_REDIRECTS) throw installerError('PACKAGE_DOWNLOAD_FAILED', '安装包重定向次数超过限制')
-    currentUrl = new URL(location, currentUrl).toString()
+    const nextUrl = new URL(location, currentUrl).toString()
+    assertSafeMarketplaceRedirect(currentUrl, nextUrl)
+    currentUrl = nextUrl
   }
   throw installerError('PACKAGE_DOWNLOAD_FAILED', '安装包重定向失败')
 }
@@ -270,11 +274,11 @@ function commitMarketplaceInstall(session: MarketplaceInstallerSession, onProgre
     onProgress(successState(session))
     void reportMarketplaceInstall(session, source.installedAt)
     cleanupSession(session)
-  } catch (error) {
+  } catch {
     if (backupCreated && !existsSync(targetDir) && existsSync(backupDir)) {
-      try { renameWithRetry(backupDir, targetDir) } catch (rollbackError) { console.error('[社区市场] 安装回滚失败:', rollbackError) }
+      try { renameWithRetry(backupDir, targetDir) } catch { console.error(formatMarketplaceLog('安装回滚失败', { requestId: session.installId, errorCode: 'INSTALL_COMMIT_FAILED', skillId: session.skillId, version: session.version, result: 'failed' })) }
     }
-    throw installerError('INSTALL_COMMIT_FAILED', error instanceof Error ? error.message : '写入 Skill 失败')
+    throw installerError('INSTALL_COMMIT_FAILED', '写入 Skill 失败，请检查目录权限和磁盘空间')
   }
 }
 
@@ -294,19 +298,27 @@ async function reportMarketplaceInstall(session: MarketplaceInstallerSession, in
       appVersion: session.appVersion,
     }
     const response = await fetch(`${baseUrl}/install-events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(event), signal: AbortSignal.timeout(10_000) })
-    if (!response.ok) console.warn(`[社区市场] 安装统计上报失败（HTTP ${response.status}）`)
-  } catch (error) {
-    console.warn('[社区市场] 安装统计上报失败，不影响本地安装:', error)
+    if (!response.ok) console.warn(formatMarketplaceLog('安装统计上报失败', { requestId: session.installId, errorCode: `HTTP_${response.status}`, skillId: session.skillId, version: session.version, platform: process.platform, result: 'failed' }))
+  } catch {
+    console.warn(formatMarketplaceLog('安装统计上报失败，不影响本地安装', { requestId: session.installId, errorCode: 'REPORT_FAILED', skillId: session.skillId, version: session.version, platform: process.platform, result: 'failed' }))
   }
 }
 
 function cleanupSession(session: MarketplaceInstallerSession): void {
   try {
     if (existsSync(session.tempDir)) rmSyncWithRetry(session.tempDir, { recursive: true, force: true })
-  } catch (error) {
-    console.warn(`[社区市场] 临时目录清理失败 (${session.installId}):`, error)
+  } catch {
+    console.warn(formatMarketplaceLog('临时目录清理失败', { requestId: session.installId, errorCode: 'CLEANUP_FAILED', skillId: session.skillId, version: session.version, result: 'failed' }))
   } finally {
     sessions.delete(session.installId)
+  }
+}
+
+export function assertSafeMarketplaceRedirect(from: string, to: string): void {
+  const source = new URL(from)
+  const target = new URL(to)
+  if (!['http:', 'https:'].includes(target.protocol) || (source.protocol === 'https:' && target.protocol !== 'https:')) {
+    throw installerError('PACKAGE_DOWNLOAD_FAILED', '安装包重定向地址不安全')
   }
 }
 

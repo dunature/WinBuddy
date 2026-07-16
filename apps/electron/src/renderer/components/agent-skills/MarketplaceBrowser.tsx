@@ -3,7 +3,7 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ArrowLeft, Blocks, CheckCircle2, ChevronRight, File, Folder, Loader2, Search, Store, Wrench } from 'lucide-react'
-import type { MarketplaceCategory, MarketplaceExample, MarketplaceFileContent, MarketplaceFileNode, MarketplaceSkillDetail, MarketplaceSkillSummary } from '@proma/shared'
+import { formatMarketplaceLog, type MarketplaceCategory, type MarketplaceExample, type MarketplaceFileContent, type MarketplaceFileNode, type MarketplaceSkillDetail, type MarketplaceSkillSummary } from '@proma/shared'
 import { cn } from '@/lib/utils'
 import {
   marketplaceCategoryAtom,
@@ -36,7 +36,7 @@ export function MarketplaceBrowser({ apiUrl, workspaceSlug, installEnabled, comm
   React.useEffect(() => {
     let active = true
     if (!installEnabled) return
-    window.electronAPI.checkMarketplaceUpdates({ workspaceSlug }).then((updates) => { if (active) setUpdates(updates) }).catch((error: unknown) => console.warn('[社区市场] 更新检查失败:', error))
+    window.electronAPI.checkMarketplaceUpdates({ workspaceSlug }).then((updates) => { if (active) setUpdates(updates) }).catch(() => console.warn(formatMarketplaceLog('更新检查失败', { errorCode: 'UPDATE_CHECK_FAILED', result: 'failed' })))
     return () => { active = false }
   }, [installEnabled, setUpdates, workspaceSlug])
 

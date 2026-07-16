@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
 import type { MarketplaceInstallState } from '@proma/shared'
-import { cancelMarketplaceInstall, createMarketplaceInstall, getMarketplaceInstallerSession, resolveMarketplaceInstallConflict, startMarketplaceInstall } from './marketplace-installer'
+import { assertSafeMarketplaceRedirect, cancelMarketplaceInstall, createMarketplaceInstall, getMarketplaceInstallerSession, resolveMarketplaceInstallConflict, startMarketplaceInstall } from './marketplace-installer'
 
 const home = mkdtempSync(join(tmpdir(), 'proma-marketplace-home-'))
 const configDir = join(home, '.proma')
@@ -80,6 +80,18 @@ afterAll(() => {
 })
 
 describe('Marketplace 安装下载与 staging', () => {
+  test('IPC 输入不接受绝对路径、traversal 或非法版本', () => {
+    expect(() => createMarketplaceInstall({ skillId: 'skill-1', slug: '../escape', version: '1.0.0', workspaceSlug: 'test-workspace' })).toThrow('Skill slug 格式无效')
+    expect(() => createMarketplaceInstall({ skillId: 'skill-1', slug: 'research', version: 'latest', workspaceSlug: 'test-workspace' })).toThrow('版本格式无效')
+    expect(() => createMarketplaceInstall({ skillId: '/tmp/skill', slug: 'research', version: '1.0.0', workspaceSlug: 'test-workspace' })).toThrow('Skill ID 格式无效')
+  })
+
+  test('重定向拒绝 HTTPS 降级和非 HTTP 协议', () => {
+    expect(() => assertSafeMarketplaceRedirect('https://market.example/package', 'http://market.example/package')).toThrow('重定向地址不安全')
+    expect(() => assertSafeMarketplaceRedirect('https://market.example/package', 'file:///tmp/package')).toThrow('重定向地址不安全')
+    expect(() => assertSafeMarketplaceRedirect('https://market.example/package', 'https://oss.example/package')).not.toThrow()
+  })
+
   test('完成下载、hash、ZIP 预检并只解压到临时 staging', async () => {
     const created = createMarketplaceInstall({ skillId: 'skill-1', slug: 'research', version: '1.0.0', workspaceSlug: 'test-workspace' })
     const states: MarketplaceInstallState[] = []

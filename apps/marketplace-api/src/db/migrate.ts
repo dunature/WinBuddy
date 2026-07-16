@@ -29,13 +29,20 @@ export async function runMarketplaceMigrations(databaseUrl: string): Promise<str
           await transaction`INSERT INTO marketplace_schema_migrations (name) VALUES (${name})`
         })
       } catch (error) {
-        throw new Error(`Marketplace migration 失败：${name}`, { cause: error })
+        throw new MarketplaceMigrationError(name, error)
       }
       applied.push(name)
     }
     return applied
   } finally {
     await sql.end()
+  }
+}
+
+export class MarketplaceMigrationError extends Error {
+  readonly code = 'MIGRATION_FAILED' as const
+  constructor(readonly migration: string, cause: unknown) {
+    super(`Marketplace migration 失败：${migration}`, { cause })
   }
 }
 

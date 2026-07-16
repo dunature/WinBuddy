@@ -35,3 +35,4 @@ export {
   isPersistableSDKSystemMessage,
   type SDKCompactStatus,
 } from './agent-system-message'
+export { formatMarketplaceLog, sanitizeMarketplaceLogFields, type MarketplaceLogFields } from './marketplace-logging'

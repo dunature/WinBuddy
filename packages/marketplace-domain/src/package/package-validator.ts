@@ -33,6 +33,7 @@ export const DEFAULT_MARKETPLACE_PACKAGE_LIMITS: MarketplacePackageLimits = {
 
 const BLOCKED_SEGMENTS = new Set(['.git', 'node_modules', '__MACOSX', '.cache'])
 const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i
+const WINDOWS_UNSAFE_SEGMENT = /[. ]$|:/
 
 function packageIssue(code: string, message: string, path?: string): MarketplacePackageIssue {
   return { code, message, ...(path ? { path } : {}) }
@@ -77,6 +78,9 @@ export function validateMarketplacePackageEntries(
     }
     if (segments.some((segment) => WINDOWS_RESERVED_NAME.test(segment))) {
       issues.push(packageIssue('PACKAGE_WINDOWS_RESERVED_PATH', '包内路径包含 Windows 保留名称', normalizedPath))
+    }
+    if (segments.some((segment) => WINDOWS_UNSAFE_SEGMENT.test(segment))) {
+      issues.push(packageIssue('PACKAGE_WINDOWS_UNSAFE_PATH', '包内路径包含 Windows 不安全名称', normalizedPath))
     }
     if (entry.isSymbolicLink) {
       issues.push(packageIssue('PACKAGE_SYMLINK_UNSAFE', '市场 Skill 包不允许符号链接', normalizedPath))

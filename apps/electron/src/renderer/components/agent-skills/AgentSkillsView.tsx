@@ -26,7 +26,7 @@ import { agentSkillsSurfaceAtom, agentSkillsTabAtom } from '@/atoms/active-view'
 import { settingsOpenAtom, settingsTabAtom, toolSettingsFocusAtom, type ToolSettingsFocus } from '@/atoms/settings-tab'
 import { useProjectActions } from '@/hooks/useProjectActions'
 import { useCreateSession } from '@/hooks/useCreateSession'
-import type { BuiltinMcpServerSummary, McpServerEntry, SkillMeta } from '@proma/shared'
+import { formatMarketplaceLog, type BuiltinMcpServerSummary, type McpServerEntry, type SkillMeta } from '@proma/shared'
 import { useAgentSkillsData } from './useAgentSkillsData'
 import { SkillCard } from './SkillCard'
 import { McpCard } from './McpCard'
@@ -126,7 +126,7 @@ export function AgentSkillsView(): React.ReactElement {
         community: settings.marketplaceCommunityEnabled === true && features.community,
         apiUrl: settings.marketplaceApiUrl,
       })
-    }).catch((error: unknown) => console.error('[社区市场] 读取内部配置失败:', error))
+    }).catch(() => console.error(formatMarketplaceLog('读取内部配置失败', { errorCode: 'SETTINGS_READ_FAILED', result: 'failed' })))
     return () => { active = false; controller.abort() }
   }, [])
 

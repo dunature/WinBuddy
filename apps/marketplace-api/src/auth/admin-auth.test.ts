@@ -8,7 +8,7 @@ class MemoryAuthRepository implements AdminAuthRepository {
   sessions = new Map<string, { login: string; expiresAt: Date }>()
   enabled = true
   async findEnabledUser(login: string) { return this.enabled && login === user.githubLogin ? user : undefined }
-  async createSession(tokenHash: string, login: string, expiresAt: Date) { this.sessions.set(tokenHash, { login, expiresAt }) }
+  async createSession(tokenHash: string, login: string, expiresAt: Date) { for (const [key, session] of this.sessions) if (session.login === login) this.sessions.delete(key); this.sessions.set(tokenHash, { login, expiresAt }) }
   async findSession(tokenHash: string, now: Date) { const session = this.sessions.get(tokenHash); return session && session.expiresAt > now && this.enabled ? user : undefined }
   async deleteSession(tokenHash: string) { this.sessions.delete(tokenHash) }
 }
@@ -24,6 +24,8 @@ describe('AdminAuthService', () => {
     const auth = new AdminAuthService(new MemoryAuthRepository(), github, 'a'.repeat(32), () => now)
     const { state } = auth.createAuthorization()
     expect(auth.verifyState(state)).toBe(true)
+    expect(auth.consumeState(state)).toBe(true)
+    expect(auth.consumeState(state)).toBe(false)
     expect(auth.verifyState(`${state}x`)).toBe(false)
     now = new Date('2026-07-16T00:11:00Z')
     expect(auth.verifyState(state)).toBe(false)
@@ -35,8 +37,11 @@ describe('AdminAuthService', () => {
     const result = await auth.completeAuthorization('code')
     expect(result?.user.githubLogin).toBe('proma-editor')
     expect(await auth.getSession(result!.token)).toEqual(user)
-    await auth.revoke(result!.token)
+    const rotated = await auth.completeAuthorization('second-code')
     expect(await auth.getSession(result!.token)).toBeUndefined()
+    expect(await auth.getSession(rotated!.token)).toEqual(user)
+    await auth.revoke(rotated!.token)
+    expect(await auth.getSession(rotated!.token)).toBeUndefined()
     repository.enabled = false
     expect(await auth.completeAuthorization('code')).toBeUndefined()
   })

@@ -1,5 +1,5 @@
 import postgres from 'postgres'
-import type { MarketplaceAdminUser, MarketplaceEditablePublishMetadata, MarketplaceReviewDecisionInput, MarketplaceReviewResult } from '@proma/shared'
+import { formatMarketplaceLog, type MarketplaceAdminUser, type MarketplaceEditablePublishMetadata, type MarketplaceReviewDecisionInput, type MarketplaceReviewResult } from '@proma/shared'
 import type { MarketplaceObjectStore } from '../object-store/object-store.ts'
 import { publishedPackageKey } from '../object-store/object-store.ts'
 import { SubmissionError } from '../submissions/submission-service.ts'
@@ -103,7 +103,8 @@ export class PostgresReviewService {
     } catch (error) {
       await this.objects.deleteObject(destination).catch(() => undefined)
       await this.sql`UPDATE marketplace_submissions SET status='publish_failed', updated_at=now() WHERE id=${candidate.id}`
-      throw new SubmissionError('PUBLISH_FAILED', error instanceof Error ? `发布失败：${error.message}` : '发布失败', 500)
+      console.error(formatMarketplaceLog('事务发布失败', { requestId: candidate.id, errorCode: 'PUBLISH_FAILED', skillId, version, result: 'failed' }))
+      throw new SubmissionError('PUBLISH_FAILED', '发布失败，请稍后重试', 500)
     }
   }
 }

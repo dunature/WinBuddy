@@ -38,6 +38,10 @@ export type MarketplaceErrorCode =
   | 'REVIEW_REASON_REQUIRED'
   | 'PUBLISH_FAILED'
   | 'FEATURE_DISABLED'
+  | 'CSRF_ORIGIN_REJECTED'
+  | 'RESOURCE_ACCESS_DENIED'
+  | 'LIFECYCLE_STATE_CONFLICT'
+  | 'MIGRATION_FAILED'
   | 'INTERNAL_ERROR'
 
 export interface MarketplaceAuthor {

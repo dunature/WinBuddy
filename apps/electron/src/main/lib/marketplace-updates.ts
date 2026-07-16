@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { compareMarketplaceVersions } from '@proma/marketplace-domain'
-import type { MarketplaceAvailableUpdate, MarketplacePermissionSet, MarketplaceSkillDetail, MarketplaceSkillSource } from '@proma/shared'
+import { formatMarketplaceLog, type MarketplaceAvailableUpdate, type MarketplacePermissionSet, type MarketplaceSkillDetail, type MarketplaceSkillSource } from '@proma/shared'
 import { getWorkspaceSkillsDir } from './config-paths'
 import { listAgentWorkspaces } from './agent-workspace-manager'
 import { readMarketplaceSkillSource } from './marketplace-source'
@@ -35,8 +35,8 @@ async function checkSourceUpdate(source: MarketplaceSkillSource): Promise<Market
     const detail = await response.json() as MarketplaceSkillDetail
     if (compareMarketplaceVersions(detail.currentVersion.version, source.version) <= 0) return undefined
     return { slug: source.slug, currentVersion: source.version, latestVersion: detail.currentVersion, permissionsAdded: addedPermissions(source.permissions, detail.currentVersion.permissions) }
-  } catch (error) {
-    console.warn(`[社区市场] 检查 ${source.slug} 更新失败:`, error)
+  } catch {
+    console.warn(formatMarketplaceLog('更新检查失败', { skillId: source.marketplaceSkillId, version: source.version, errorCode: 'UPDATE_CHECK_FAILED', result: 'failed' }))
     return undefined
   }
 }

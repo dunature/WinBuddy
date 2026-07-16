@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Copy, File, FileCode2, Folder, Image as Imag
 import type { MarketplaceFileContent, MarketplaceFileNode } from '@proma/shared'
 import { marketplaceApi } from '../lib/api-client.ts'
 import { MarkdownGuide } from './MarkdownGuide.tsx'
+import { safeMarketplaceAssetUrl } from '../lib/safe-url.ts'
 
 interface RemoteFileBrowserProps {
   slug: string
@@ -87,6 +88,7 @@ function FileNodeIcon({ kind }: { kind: MarketplaceFileNode['kind'] }): React.Re
 }
 
 function FilePreview({ content }: { content: MarketplaceFileContent }): React.ReactElement {
+  const safeAssetUrl = safeMarketplaceAssetUrl(content.assetUrl)
   const copy = (): void => {
     if (content.content) void navigator.clipboard.writeText(content.content)
   }
@@ -102,8 +104,8 @@ function FilePreview({ content }: { content: MarketplaceFileContent }): React.Re
       <div className="max-h-[700px] overflow-auto p-5 sm:p-7">
         {content.kind === 'markdown' && content.content && <MarkdownGuide markdown={content.content} />}
         {(content.kind === 'code' || content.kind === 'json' || content.kind === 'yaml' || content.kind === 'text') && content.content && <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-sm leading-6 text-[#454239]"><code>{content.content}</code></pre>}
-        {content.kind === 'image' && content.assetUrl && <img className="mx-auto max-h-[560px] max-w-full rounded-lg border border-line" src={content.assetUrl} alt={content.path} />}
-        {(!content.content && !content.assetUrl) && <BrowserState title="此文件不提供在线预览" description="二进制、超大或受限制文件只展示元信息，内容不会传到浏览器。" />}
+        {content.kind === 'image' && safeAssetUrl && <img className="mx-auto max-h-[560px] max-w-full rounded-lg border border-line" src={safeAssetUrl} alt={content.path} />}
+        {(!content.content && !safeAssetUrl) && <BrowserState title="此文件不提供在线预览" description="二进制、超大或受限制文件只展示元信息，内容不会传到浏览器。" />}
       </div>
     </article>
   )

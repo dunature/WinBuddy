@@ -2,6 +2,7 @@ import * as React from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { createHeadingSlugger } from '../lib/markdown-headings.ts'
+import { safeMarketplaceAssetUrl, safeMarketplaceLink } from '../lib/safe-url.ts'
 
 export function MarkdownGuide({ markdown }: { markdown: string }): React.ReactElement {
   const slug = createHeadingSlugger()
@@ -25,8 +26,8 @@ export function MarkdownGuide({ markdown }: { markdown: string }): React.ReactEl
     table: ({ children }) => <div className="overflow-x-auto rounded-lg border border-line"><table className="w-full border-collapse text-left text-sm">{children}</table></div>,
     th: ({ children }) => <th className="border-b border-line bg-canvas px-4 py-3 font-semibold">{children}</th>,
     td: ({ children }) => <td className="border-b border-line px-4 py-3 last:border-b-0">{children}</td>,
-    a: ({ href, children }) => <a className="text-accent underline decoration-accent/35 underline-offset-4 hover:decoration-accent" href={href} target={href?.startsWith('http') ? '_blank' : undefined} rel={href?.startsWith('http') ? 'noreferrer' : undefined}>{children}</a>,
-    img: ({ src, alt }) => <img className="max-w-full rounded-lg border border-line" src={src} alt={alt ?? ''} loading="lazy" />,
+    a: ({ href, children }) => { const safeHref = safeMarketplaceLink(href); return <a className="text-accent underline decoration-accent/35 underline-offset-4 hover:decoration-accent" href={safeHref} target={safeHref?.startsWith('http') ? '_blank' : undefined} rel={safeHref?.startsWith('http') ? 'noreferrer' : undefined}>{children}</a> },
+    img: ({ src, alt }) => { const safeSrc = safeMarketplaceAssetUrl(src); return safeSrc ? <img className="max-w-full rounded-lg border border-line" src={safeSrc} alt={alt ?? ''} loading="lazy" /> : <span>{alt ?? '已阻止不安全图片'}</span> },
   }
 
   return <div className="guide-content space-y-6"><ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{markdown}</ReactMarkdown></div>

@@ -21,7 +21,7 @@ export function createAdminAuthRoutes(auth: AdminAuthService, webUrl: string, se
     const state = context.req.query('state')
     const savedState = getCookie(context, STATE_COOKIE)
     deleteCookie(context, STATE_COOKIE, { path: '/' })
-    if (!code || !state || state !== savedState || !auth.verifyState(state)) return context.redirect(`${webUrl}/admin/login?error=oauth_state`)
+    if (!code || !state || state !== savedState || !auth.consumeState(state)) return context.redirect(`${webUrl}/admin/login?error=oauth_state`)
     try {
       const result = await auth.completeAuthorization(code)
       if (!result) return context.redirect(`${webUrl}/admin/login?error=access_denied`)

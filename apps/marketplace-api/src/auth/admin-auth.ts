@@ -24,6 +24,7 @@ export interface GitHubOAuthClient {
 }
 
 export class AdminAuthService {
+  private readonly consumedStates = new Map<string, number>()
   constructor(
     private readonly repository: AdminAuthRepository,
     private readonly github: GitHubOAuthClient,
@@ -48,6 +49,16 @@ export class AdminAuthService {
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return false
     const expiresAt = Number(parts[1])
     return Number.isFinite(expiresAt) && expiresAt >= this.now().getTime()
+  }
+
+  consumeState(state: string): boolean {
+    const now = this.now().getTime()
+    for (const [key, expiresAt] of this.consumedStates) if (expiresAt < now) this.consumedStates.delete(key)
+    if (!this.verifyState(state)) return false
+    const key = createHash('sha256').update(state).digest('hex')
+    if (this.consumedStates.has(key)) return false
+    this.consumedStates.set(key, Number(state.split('.')[1]))
+    return true
   }
 
   async completeAuthorization(code: string): Promise<{ token: string; user: MarketplaceAdminUser } | undefined> {

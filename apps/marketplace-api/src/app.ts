@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { requestId } from 'hono/request-id'
-import type { MarketplaceApiError } from '@proma/shared'
+import { formatMarketplaceLog, type MarketplaceApiError } from '@proma/shared'
 import type { MarketplaceApiConfig } from './config.ts'
 import { MarketplaceApiException } from './errors.ts'
 import { createMarketplacePublicRoutes, type MarketplacePublicRouteServices } from './routes/public-routes.ts'
@@ -34,6 +34,17 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
     allowHeaders: ['Content-Type', 'X-Request-Id'],
     credentials: true,
   }))
+  if (options.config.adminEnabled) {
+    app.use('/api/v1/admin/*', async (context, next) => {
+      if (context.req.method === 'GET' || context.req.method === 'HEAD' || context.req.method === 'OPTIONS') return next()
+      const origin = context.req.header('Origin')
+      const fetchSite = context.req.header('Sec-Fetch-Site')
+      if (!origin || !options.config.publicOrigins.includes(origin) || fetchSite === 'cross-site') {
+        return context.json<MarketplaceApiError>({ code: 'CSRF_ORIGIN_REJECTED', message: '管理请求来源不可信', requestId: context.get('requestId') }, 403)
+      }
+      return next()
+    })
+  }
 
   app.get('/health', (context) => context.json({
     status: 'ok',
@@ -66,7 +77,7 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
       }, error.status as 400)
     }
 
-    console.error(`[Marketplace API] 未处理错误 requestId=${requestIdValue}:`, error)
+    console.error(formatMarketplaceLog('API 未处理错误', { requestId: requestIdValue, errorCode: 'INTERNAL_ERROR' }))
     return context.json<MarketplaceApiError>({
       code: 'INTERNAL_ERROR',
       message: 'Marketplace 服务暂时不可用',

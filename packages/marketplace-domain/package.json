@@ -1,6 +1,6 @@
 {
   "name": "@proma/marketplace-domain",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "license": "AGPL-3.0-only",
   "description": "Proma Skill Marketplace manifest, version and package validation",
   "type": "module",

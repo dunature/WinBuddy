@@ -51,13 +51,13 @@ export class AdminManagementService {
 }
 
 export function lifecycleTarget(current: MarketplaceSkillStatus, action: 'unlist' | 'republish' | 'archive'): MarketplaceSkillStatus {
-  if (current === 'archived' && action === 'republish') throw new SubmissionError('SUBMISSION_STATE_CONFLICT', '已归档版本不能重新发布', 409)
+  if (current === 'archived' && action === 'republish') throw new SubmissionError('LIFECYCLE_STATE_CONFLICT', '已归档版本不能重新发布', 409)
   if (action === 'unlist') {
-    if (current !== 'published' && current !== 'unlisted') throw new SubmissionError('SUBMISSION_STATE_CONFLICT', '当前版本不能下架', 409)
+    if (current !== 'published' && current !== 'unlisted') throw new SubmissionError('LIFECYCLE_STATE_CONFLICT', '当前版本不能下架', 409)
     return 'unlisted'
   }
   if (action === 'republish') {
-    if (current !== 'unlisted' && current !== 'published') throw new SubmissionError('SUBMISSION_STATE_CONFLICT', '只有已下架版本可以重新发布', 409)
+    if (current !== 'unlisted' && current !== 'published') throw new SubmissionError('LIFECYCLE_STATE_CONFLICT', '只有已下架版本可以重新发布', 409)
     return 'published'
   }
   return 'archived'

@@ -3,6 +3,7 @@ import { CheckCircle2, Clock3, Image as ImageIcon, Wrench } from 'lucide-react'
 import type { MarketplaceExample } from '@proma/shared'
 import { marketplaceApi } from '../lib/api-client.ts'
 import { MarkdownGuide } from './MarkdownGuide.tsx'
+import { safeMarketplaceAssetUrl } from '../lib/safe-url.ts'
 
 export function ExampleBrowser({ slug, version }: { slug: string; version: string }): React.ReactElement {
   const [examples, setExamples] = React.useState<MarketplaceExample[] | null>(null)
@@ -43,7 +44,7 @@ export function ExampleBrowser({ slug, version }: { slug: string; version: strin
         </ol>
         <div className="mt-8 flex items-center gap-2"><CheckCircle2 size={19} className="text-[#1e8d67]" /><h3 className="text-xl font-semibold">最终输出</h3></div>
         <div className="mt-4 rounded-lg border border-line p-5"><MarkdownGuide markdown={selected.finalOutputMarkdown} /></div>
-        {selected.assetUrls.length > 0 && <div className="mt-8"><h3 className="flex items-center gap-2 text-lg font-semibold"><ImageIcon size={18} />案例产物</h3><div className="mt-4 grid gap-4 sm:grid-cols-2">{selected.assetUrls.map((url) => <img key={url} className="w-full rounded-lg border border-line" src={url} alt={`${selected.title} 案例产物`} loading="lazy" />)}</div></div>}
+        {selected.assetUrls.some((url) => safeMarketplaceAssetUrl(url)) && <div className="mt-8"><h3 className="flex items-center gap-2 text-lg font-semibold"><ImageIcon size={18} />案例产物</h3><div className="mt-4 grid gap-4 sm:grid-cols-2">{selected.assetUrls.map((url) => { const safeUrl = safeMarketplaceAssetUrl(url); return safeUrl ? <img key={url} className="w-full rounded-lg border border-line" src={safeUrl} alt={`${selected.title} 案例产物`} loading="lazy" /> : null })}</div></div>}
       </article>
     </div>
   )

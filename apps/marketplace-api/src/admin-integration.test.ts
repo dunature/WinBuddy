@@ -174,7 +174,7 @@ async function adminRequest<T = unknown>(path: string, init?: RequestInit): Prom
 }
 
 async function rawAdminRequest(path: string, init?: RequestInit): Promise<Response> {
-  return app.request(path, { ...init, headers: { 'Content-Type': 'application/json', Cookie: 'proma_marketplace_session=test-token', ...init?.headers } })
+  return app.request(path, { ...init, headers: { 'Content-Type': 'application/json', Cookie: 'proma_marketplace_session=test-token', Origin: 'http://localhost:4173', 'Sec-Fetch-Site': 'same-site', ...init?.headers } })
 }
 
 async function uploadAndValidate(version: string): Promise<MarketplaceCreateSubmissionResult> {
