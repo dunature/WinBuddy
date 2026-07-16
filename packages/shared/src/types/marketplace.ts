@@ -189,8 +189,39 @@ export interface MarketplaceFeatureFlags {
 export interface MarketplaceSubmissionSummary {
   id: string
   fileName: string
+  packageSize: number
   status: MarketplaceSubmissionStatus
   submittedBy: string
   createdAt: string
   updatedAt: string
+}
+
+export interface MarketplaceCreateSubmissionInput {
+  fileName: string
+  size: number
+  idempotencyKey: string
+}
+
+export interface MarketplaceCreateSubmissionResult {
+  submission: MarketplaceSubmissionSummary
+  uploadUrl: string
+  objectKey: string
+  expiresAt: string
+}
+
+export interface MarketplaceCompleteSubmissionInput {
+  sha256: string
+}
+
+export interface MarketplaceValidationIssue {
+  severity: 'error' | 'warning'
+  code: string
+  message: string
+  path?: string
+}
+
+export interface MarketplaceSubmissionDetail extends MarketplaceSubmissionSummary {
+  objectKey: string
+  sha256?: string
+  validationIssues: MarketplaceValidationIssue[]
 }

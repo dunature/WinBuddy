@@ -87,6 +87,10 @@ export const marketplaceSubmissions = pgTable('marketplace_submissions', {
   status: text('status').notNull(),
   submittedBy: text('submitted_by').notNull(),
   idempotencyKey: text('idempotency_key').notNull(),
+  fileName: text('file_name').notNull().default('package.zip'),
+  packageSize: bigint('package_size', { mode: 'number' }).notNull().default(0),
+  sha256: text('sha256'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [uniqueIndex('marketplace_submissions_idempotency_uidx').on(table.idempotencyKey)])
 
@@ -96,6 +100,9 @@ export const marketplaceValidationRuns = pgTable('marketplace_validation_runs', 
   status: text('status').notNull(),
   startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
   completedAt: timestamp('completed_at', { withTimezone: true }),
+  leaseOwner: text('lease_owner'),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  attempt: integer('attempt').notNull().default(0),
 })
 
 export const marketplaceValidationIssues = pgTable('marketplace_validation_issues', {

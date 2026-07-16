@@ -7,12 +7,15 @@ import { MarketplaceApiException } from './errors.ts'
 import { createMarketplacePublicRoutes, type MarketplacePublicRouteServices } from './routes/public-routes.ts'
 import type { AdminAuthService } from './auth/admin-auth.ts'
 import { createAdminAuthRoutes } from './routes/admin-auth-routes.ts'
+import type { SubmissionService } from './submissions/submission-service.ts'
+import { createAdminSubmissionRoutes } from './routes/admin-submission-routes.ts'
 
 export interface CreateMarketplaceAppOptions {
   config: MarketplaceApiConfig
   version?: string
   services?: MarketplacePublicRouteServices
   adminAuth?: AdminAuthService
+  submissions?: SubmissionService
 }
 
 export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono {
@@ -34,6 +37,7 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
   if (options.services) app.route('/api/v1', createMarketplacePublicRoutes(options.services))
   if (options.adminAuth && options.config.adminEnabled) {
     app.route('/api/v1/admin/auth', createAdminAuthRoutes(options.adminAuth, options.config.webUrl, options.config.environment === 'production'))
+    if (options.submissions) app.route('/api/v1/admin/submissions', createAdminSubmissionRoutes(options.adminAuth, options.submissions))
   }
 
   app.notFound((context) => context.json<MarketplaceApiError>({

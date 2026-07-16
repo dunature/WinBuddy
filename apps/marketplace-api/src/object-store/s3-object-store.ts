@@ -1,6 +1,5 @@
-import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import { GetObjectCommand } from '@aws-sdk/client-s3'
 import type { MarketplaceObjectStore, MarketplaceStoredObject } from './object-store.ts'
 
 export interface S3MarketplaceObjectStoreOptions {
@@ -37,6 +36,30 @@ export class S3MarketplaceObjectStore implements MarketplaceObjectStore {
     return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.options.bucket, Key: key }), {
       expiresIn: expiresInSeconds,
     })
+  }
+
+  async getSignedUploadUrl(key: string, expiresInSeconds: number, contentType: string): Promise<string> {
+    return getSignedUrl(this.client, new PutObjectCommand({ Bucket: this.options.bucket, Key: key, ContentType: contentType }), { expiresIn: expiresInSeconds })
+  }
+
+  async getObject(key: string): Promise<Uint8Array> {
+    const response = await this.client.send(new GetObjectCommand({ Bucket: this.options.bucket, Key: key }))
+    if (!response.Body) throw new Error(`对象不存在：${key}`)
+    return response.Body.transformToByteArray()
+  }
+
+  async headObject(key: string) {
+    try {
+      const response = await this.client.send(new HeadObjectCommand({ Bucket: this.options.bucket, Key: key }))
+      return { key, size: response.ContentLength ?? 0, ...(response.ContentType ? { contentType: response.ContentType } : {}), ...(response.ETag ? { etag: response.ETag } : {}) }
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && '$metadata' in error && (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) return undefined
+      throw error
+    }
+  }
+
+  async copyObject(sourceKey: string, destinationKey: string): Promise<void> {
+    await this.client.send(new CopyObjectCommand({ Bucket: this.options.bucket, Key: destinationKey, CopySource: `${this.options.bucket}/${sourceKey}` }))
   }
 
   async deleteObject(key: string): Promise<void> {
