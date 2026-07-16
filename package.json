@@ -16,6 +16,7 @@
     "build": "bun run --filter='*' build",
     "typecheck": "bun run --filter='*' typecheck",
     "test": "bun test"
+    ,"marketplace:content:validate": "bun marketplace-content/validate.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
