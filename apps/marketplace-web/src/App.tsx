@@ -5,6 +5,8 @@ import { SkillDetailPage } from './pages/SkillDetailPage.tsx'
 import { AdminLoginPage } from './pages/AdminLoginPage.tsx'
 import { AdminHomePage } from './pages/AdminHomePage.tsx'
 import { AdminProtectedRoute } from './components/AdminProtectedRoute.tsx'
+import { AdminLayout } from './components/AdminLayout.tsx'
+import { AdminUploadPage } from './pages/AdminUploadPage.tsx'
 
 export function App(): React.ReactElement {
   return (
@@ -14,7 +16,7 @@ export function App(): React.ReactElement {
         <Route path="/" element={<><SiteHeader /><main id="main-content"><MarketplacePage /></main></>} />
         <Route path="/skills/:slug" element={<><SiteHeader /><main id="main-content"><SkillDetailPage /></main></>} />
         <Route path="/admin/login" element={<AdminLoginPage />} />
-        <Route element={<AdminProtectedRoute />}><Route path="/admin" element={<AdminHomePage />} /></Route>
+        <Route element={<AdminProtectedRoute />}><Route element={<AdminLayout />}><Route path="/admin" element={<AdminHomePage />} /><Route path="/admin/uploads" element={<AdminUploadPage />} /></Route></Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>

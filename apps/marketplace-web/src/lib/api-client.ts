@@ -9,6 +9,10 @@ import type {
   MarketplaceFileContent,
   MarketplaceFileNode,
   MarketplaceAdminSession,
+  MarketplaceCreateSubmissionInput,
+  MarketplaceCreateSubmissionResult,
+  MarketplaceSubmissionDetail,
+  MarketplaceSubmissionSummary,
 } from '@proma/shared'
 
 const DEFAULT_API_URL = 'http://localhost:4310/api/v1'
@@ -55,6 +59,10 @@ export class MarketplaceApiClient {
   getAdminSession(signal?: AbortSignal): Promise<MarketplaceAdminSession> { return this.get('/admin/auth/session', signal) }
   logoutAdmin(): Promise<{ ok: boolean }> { return this.post('/admin/auth/logout') }
   getAdminLoginUrl(): string { return `${this.baseUrl}/admin/auth/github/start` }
+  listSubmissions(signal?: AbortSignal): Promise<MarketplaceSubmissionSummary[]> { return this.get('/admin/submissions', signal) }
+  getSubmission(id: string, signal?: AbortSignal): Promise<MarketplaceSubmissionDetail> { return this.get(`/admin/submissions/${encodeURIComponent(id)}`, signal) }
+  createSubmission(input: MarketplaceCreateSubmissionInput): Promise<MarketplaceCreateSubmissionResult> { return this.post('/admin/submissions', input) }
+  completeSubmission(id: string, sha256: string): Promise<MarketplaceSubmissionSummary> { return this.post(`/admin/submissions/${encodeURIComponent(id)}/complete`, { sha256 }) }
 
   listCategories(signal?: AbortSignal): Promise<MarketplaceCategory[]> {
     return this.get('/categories', signal)
