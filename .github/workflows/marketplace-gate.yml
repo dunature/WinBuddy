@@ -1,0 +1,104 @@
+name: Marketplace Gate
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUN_VERSION: 1.3.13
+
+jobs:
+  ubuntu-gate:
+    name: Ubuntu · 全仓与管理链路
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      MARKETPLACE_TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: 安装依赖
+        run: bun install --frozen-lockfile
+      - name: 全仓类型检查
+        run: bun run typecheck
+      - name: 全仓测试
+        run: bun test
+      - name: 校验首发内容
+        run: bun run marketplace:content:validate
+      - name: 构建 Marketplace API
+        run: bun run --cwd apps/marketplace-api build
+      - name: 构建 Marketplace Web
+        run: bun run --cwd apps/marketplace-web build
+
+  installer-platforms:
+    name: ${{ matrix.name }} · 安装器与 Electron
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-latest
+          - name: macOS x64
+            os: macos-15-intel
+          - name: Windows x64
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: 安装依赖
+        run: bun install --frozen-lockfile
+      - name: Marketplace 安装主流程
+        run: bun run --cwd apps/electron test:marketplace
+      - name: 构建 Electron main
+        run: bun run --cwd apps/electron build:main
+      - name: 构建 Electron preload
+        run: bun run --cwd apps/electron build:preload
+      - name: 构建 Electron renderer
+        run: bun run --cwd apps/electron build:renderer
+
+  linux-status:
+    name: Linux · 逻辑与构建状态
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: 安装依赖
+        run: bun install --frozen-lockfile
+      - name: Marketplace 安装主流程
+        run: bun run --cwd apps/electron test:marketplace
+      - name: 构建 Electron 三层
+        run: bun run --cwd apps/electron build:main && bun run --cwd apps/electron build:preload && bun run --cwd apps/electron build:renderer
+      - name: 输出 Linux 状态
+        run: |
+          echo '## Linux Marketplace 状态' >> "$GITHUB_STEP_SUMMARY"
+          echo '- 安装器逻辑测试：通过' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Electron main/preload/renderer：构建通过' >> "$GITHUB_STEP_SUMMARY"
+          echo '- 桌面发行包：尚未完成 GUI、签名与发行验收，不标记为正式支持' >> "$GITHUB_STEP_SUMMARY"
+

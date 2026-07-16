@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.14.32",
+  "version": "0.14.33",
   "description": "Proma next gen ai software with general agents - Electron App",
   "main": "dist/main.cjs",
   "author": {
@@ -25,6 +25,7 @@
     "build": "bun run build:main && bun run build:preload && bun run build:renderer && bun run build:cli && bun run build:resources",
     "start": "bun run build && bunx electron .",
     "typecheck": "tsc --noEmit",
+    "test:marketplace": "bun test src/main/lib/marketplace-installer.test.ts src/main/lib/marketplace-source.test.ts src/main/lib/marketplace-updates.test.ts",
     "generate:icons": "cd resources && ./generate-icons.sh",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
