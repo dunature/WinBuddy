@@ -8,6 +8,7 @@ import type {
   MarketplaceExample,
   MarketplaceFileContent,
   MarketplaceFileNode,
+  MarketplaceAdminSession,
 } from '@proma/shared'
 
 const DEFAULT_API_URL = 'http://localhost:4310/api/v1'
@@ -30,7 +31,7 @@ export class MarketplaceApiClient {
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout
     let response: Response
     try {
-      response = await fetch(`${this.baseUrl}${path}`, { signal: combined, headers: { Accept: 'application/json' } })
+      response = await fetch(`${this.baseUrl}${path}`, { signal: combined, credentials: 'include', headers: { Accept: 'application/json' } })
     } catch (error) {
       throw new MarketplaceRequestError({
         code: 'MARKETPLACE_OFFLINE',
@@ -41,6 +42,19 @@ export class MarketplaceApiClient {
     if (!response.ok) throw new MarketplaceRequestError(await response.json() as MarketplaceApiError)
     return response.json() as Promise<T>
   }
+
+  async post<T>(path: string, body?: unknown): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'POST', credentials: 'include', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    })
+    if (!response.ok) throw new MarketplaceRequestError(await response.json() as MarketplaceApiError)
+    return response.json() as Promise<T>
+  }
+
+  getAdminSession(signal?: AbortSignal): Promise<MarketplaceAdminSession> { return this.get('/admin/auth/session', signal) }
+  logoutAdmin(): Promise<{ ok: boolean }> { return this.post('/admin/auth/logout') }
+  getAdminLoginUrl(): string { return `${this.baseUrl}/admin/auth/github/start` }
 
   listCategories(signal?: AbortSignal): Promise<MarketplaceCategory[]> {
     return this.get('/categories', signal)

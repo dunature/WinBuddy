@@ -1,6 +1,8 @@
 export type MarketplaceScope = 'all' | 'official' | 'community'
 export type MarketplaceSort = 'popular' | 'recent'
-export type MarketplaceSkillStatus = 'draft' | 'validating' | 'pending_review' | 'published' | 'rejected' | 'unlisted' | 'archived'
+export type MarketplaceSkillStatus = 'draft' | 'validating' | 'pending_review' | 'approved' | 'publishing' | 'published' | 'publish_failed' | 'rejected' | 'unlisted' | 'archived'
+export type MarketplaceAdminRole = 'admin' | 'reviewer' | 'editor'
+export type MarketplaceSubmissionStatus = 'uploading' | 'validating' | 'validation_failed' | 'pending_review' | 'rejected' | 'approved' | 'publishing' | 'published' | 'publish_failed'
 export type MarketplaceFileKind = 'directory' | 'markdown' | 'text' | 'code' | 'json' | 'yaml' | 'image' | 'binary'
 
 export interface MarketplaceApiError {
@@ -26,6 +28,15 @@ export type MarketplaceErrorCode =
   | 'INSTALL_COMMIT_FAILED'
   | 'VALIDATION_FAILED'
   | 'VERSION_ALREADY_EXISTS'
+  | 'ADMIN_AUTH_REQUIRED'
+  | 'ADMIN_ACCESS_DENIED'
+  | 'OAUTH_STATE_INVALID'
+  | 'OAUTH_EXCHANGE_FAILED'
+  | 'SUBMISSION_NOT_FOUND'
+  | 'SUBMISSION_STATE_CONFLICT'
+  | 'UPLOAD_FAILED'
+  | 'REVIEW_REASON_REQUIRED'
+  | 'PUBLISH_FAILED'
   | 'INTERNAL_ERROR'
 
 export interface MarketplaceAuthor {
@@ -154,4 +165,32 @@ export interface MarketplaceInstallEventInput {
   installedAt: string
   platform: 'darwin' | 'win32' | 'linux'
   appVersion: string
+}
+
+export interface MarketplaceAdminUser {
+  githubLogin: string
+  displayName: string
+  avatarUrl?: string
+  role: MarketplaceAdminRole
+}
+
+export interface MarketplaceAdminSession {
+  authenticated: boolean
+  user?: MarketplaceAdminUser
+}
+
+export interface MarketplaceFeatureFlags {
+  browse: boolean
+  install: boolean
+  admin: boolean
+  community: boolean
+}
+
+export interface MarketplaceSubmissionSummary {
+  id: string
+  fileName: string
+  status: MarketplaceSubmissionStatus
+  submittedBy: string
+  createdAt: string
+  updatedAt: string
 }

@@ -5,11 +5,14 @@ import type { MarketplaceApiError } from '@proma/shared'
 import type { MarketplaceApiConfig } from './config.ts'
 import { MarketplaceApiException } from './errors.ts'
 import { createMarketplacePublicRoutes, type MarketplacePublicRouteServices } from './routes/public-routes.ts'
+import type { AdminAuthService } from './auth/admin-auth.ts'
+import { createAdminAuthRoutes } from './routes/admin-auth-routes.ts'
 
 export interface CreateMarketplaceAppOptions {
   config: MarketplaceApiConfig
   version?: string
   services?: MarketplacePublicRouteServices
+  adminAuth?: AdminAuthService
 }
 
 export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono {
@@ -20,6 +23,7 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
     origin: (origin) => options.config.publicOrigins.includes(origin) ? origin : options.config.publicOrigins[0] ?? '',
     allowMethods: ['GET', 'POST', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'X-Request-Id'],
+    credentials: true,
   }))
 
   app.get('/health', (context) => context.json({
@@ -28,6 +32,9 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
   }))
 
   if (options.services) app.route('/api/v1', createMarketplacePublicRoutes(options.services))
+  if (options.adminAuth && options.config.adminEnabled) {
+    app.route('/api/v1/admin/auth', createAdminAuthRoutes(options.adminAuth, options.config.webUrl, options.config.environment === 'production'))
+  }
 
   app.notFound((context) => context.json<MarketplaceApiError>({
     code: 'SKILL_NOT_FOUND',

@@ -136,6 +136,16 @@ export const marketplaceAuditLogs = pgTable('marketplace_audit_logs', {
 
 export const marketplaceAdminUsers = pgTable('marketplace_admin_users', {
   githubLogin: text('github_login').primaryKey(),
+  displayName: text('display_name').notNull().default(''),
+  avatarUrl: text('avatar_url'),
+  role: text('role').notNull().default('editor'),
   enabled: boolean('enabled').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const marketplaceAdminSessions = pgTable('marketplace_admin_sessions', {
+  tokenHash: text('token_hash').primaryKey(),
+  githubLogin: text('github_login').notNull().references(() => marketplaceAdminUsers.githubLogin),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
