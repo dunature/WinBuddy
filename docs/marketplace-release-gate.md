@@ -30,7 +30,7 @@
 
 ## CI 状态
 
-[Marketplace Gate run 29468667362](https://github.com/dunature/WinBuddy/actions/runs/29468667362) 的五个任务均未分配 runner。GitHub 注解为账号近期付款失败或 Actions spending limit 需要提高，因此该运行不代表任何平台测试失败或通过。修复 GitHub Billing/Actions 额度后必须重新运行，并把本表第 11、12 项更新为实际结果。
+[Marketplace Gate run 29469649084](https://github.com/dunature/WinBuddy/actions/runs/29469649084) 的五个任务均未分配 runner。GitHub 注解为账号近期付款失败或 Actions spending limit 需要提高，因此该运行不代表任何平台测试失败或通过。修复 GitHub Billing/Actions 额度后必须重新运行，并把本表第 11、12 项更新为实际结果。
 
 ## 放行顺序
 
