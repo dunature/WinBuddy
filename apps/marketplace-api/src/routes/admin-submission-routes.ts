@@ -19,9 +19,9 @@ export function createAdminSubmissionRoutes(auth: AdminAuthService, service: Sub
     context.set('adminUser', user)
     await next()
   })
-  routes.get('/', async (context) => context.json(await service.list()))
+  routes.get('/', async (context) => context.json(await service.list(context.get('adminUser'))))
   routes.get('/:id', async (context) => {
-    const submission = await service.get(context.req.param('id'))
+    const submission = await service.get(context.req.param('id'), context.get('adminUser'))
     return submission ? context.json(submission) : context.json({ code: 'SUBMISSION_NOT_FOUND', message: '找不到该上传记录', requestId: context.get('requestId') }, 404)
   })
   routes.post('/', async (context) => handle(context, async () => service.create(createSchema.parse(await context.req.json()), context.get('adminUser'))))

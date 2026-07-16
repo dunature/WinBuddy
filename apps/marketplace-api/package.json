@@ -1,6 +1,6 @@
 {
   "name": "@proma/marketplace-api",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
@@ -9,6 +9,7 @@
     "start": "bun src/index.ts",
     "worker": "bun src/worker.ts",
     "typecheck": "tsc --noEmit",
+    "test:integration": "bun test src/admin-integration.test.ts",
     "db:migrate": "bun src/db/migrate.ts"
   },
   "dependencies": {

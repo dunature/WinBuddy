@@ -5,7 +5,14 @@ import type { AdminAuthService } from '../auth/admin-auth.ts'
 import type { PostgresReviewService } from '../reviews/review-service.ts'
 import { SubmissionError } from '../submissions/submission-service.ts'
 
-const schema = z.object({ decision: z.enum(['approve', 'reject']), reason: z.string().max(2000).optional() })
+const metadataSchema = z.object({
+  authorHandle: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/),
+  authorName: z.string().min(1).max(100),
+  category: z.string().min(1).max(64),
+  displayName: z.string().min(1).max(100),
+  description: z.string().min(10).max(500),
+})
+const schema = z.object({ decision: z.enum(['approve', 'reject']), reason: z.string().max(2000).optional(), metadata: metadataSchema.optional() })
 export function createAdminReviewRoutes(auth: AdminAuthService, reviews: PostgresReviewService): Hono {
   const routes = new Hono()
   routes.post('/:id/decision', async (context) => {

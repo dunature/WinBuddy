@@ -163,7 +163,7 @@
     },
     "apps/marketplace-api": {
       "name": "@proma/marketplace-api",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "dependencies": {
         "@aws-sdk/client-s3": "3.1087.0",
         "@aws-sdk/s3-request-presigner": "3.1087.0",
@@ -185,7 +185,7 @@
     },
     "apps/marketplace-web": {
       "name": "@proma/marketplace-web",
-      "version": "0.1.7",
+      "version": "0.1.8",
       "dependencies": {
         "@proma/shared": "workspace:*",
         "dompurify": "3.4.5",
@@ -250,7 +250,7 @@
     },
     "packages/shared": {
       "name": "@proma/shared",
-      "version": "0.1.50",
+      "version": "0.1.51",
       "devDependencies": {
         "typescript": "^5.0.0",
       },

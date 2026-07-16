@@ -8,11 +8,14 @@ const MAX_PACKAGE_BYTES = 20 * 1024 * 1024
 
 export interface SubmissionRepository {
   findByIdempotencyKey(key: string, actor: string): Promise<MarketplaceSubmissionSummary | undefined>
-  create(input: { id: string; objectKey: string; fileName: string; size: number; actor: string; idempotencyKey: string }): Promise<MarketplaceSubmissionSummary>
+  create(input: { id: string; fileName: string; size: number; actor: string; idempotencyKey: string }): Promise<MarketplaceSubmissionSummary>
   complete(id: string, actor: string, sha256: string): Promise<MarketplaceSubmissionSummary | undefined>
-  list(): Promise<MarketplaceSubmissionSummary[]>
+  list(actor?: string): Promise<MarketplaceSubmissionSummary[]>
   get(id: string): Promise<MarketplaceSubmissionDetail | undefined>
+  getInternal(id: string): Promise<SubmissionInternalRecord | undefined>
 }
+
+export interface SubmissionInternalRecord extends MarketplaceSubmissionDetail { objectKey: string }
 
 export class SubmissionService {
   constructor(private readonly repository: SubmissionRepository, private readonly objects: MarketplaceObjectStore, private readonly now: () => Date = () => new Date()) {}
@@ -20,15 +23,15 @@ export class SubmissionService {
   async create(input: MarketplaceCreateSubmissionInput, actor: MarketplaceAdminUser): Promise<MarketplaceCreateSubmissionResult> {
     if (!input.fileName.toLowerCase().endsWith('.zip') || input.size <= 0 || input.size > MAX_PACKAGE_BYTES) throw new SubmissionError('PACKAGE_TOO_LARGE', '仅支持不超过 20 MB 的 ZIP 文件', 400)
     const existing = await this.repository.findByIdempotencyKey(input.idempotencyKey, actor.githubLogin)
-    const submission = existing ?? await this.repository.create({ id: randomUUID(), objectKey: '', fileName: input.fileName, size: input.size, actor: actor.githubLogin, idempotencyKey: input.idempotencyKey })
+    const submission = existing ?? await this.repository.create({ id: randomUUID(), fileName: input.fileName, size: input.size, actor: actor.githubLogin, idempotencyKey: input.idempotencyKey })
     const objectKey = quarantinePackageKey(submission.id)
     const uploadUrl = await this.objects.getSignedUploadUrl(objectKey, 600, 'application/zip')
-    return { submission, objectKey, uploadUrl, expiresAt: new Date(this.now().getTime() + 600_000).toISOString() }
+    return { submission, uploadUrl, expiresAt: new Date(this.now().getTime() + 600_000).toISOString() }
   }
 
   async complete(id: string, sha256: string, actor: MarketplaceAdminUser): Promise<MarketplaceSubmissionSummary> {
     if (!/^[a-f0-9]{64}$/i.test(sha256)) throw new SubmissionError('VALIDATION_FAILED', 'SHA256 格式无效', 400)
-    const detail = await this.repository.get(id)
+    const detail = await this.repository.getInternal(id)
     if (!detail) throw new SubmissionError('SUBMISSION_NOT_FOUND', '找不到该上传记录', 404)
     if (detail.submittedBy !== actor.githubLogin && actor.role !== 'admin') throw new SubmissionError('ADMIN_ACCESS_DENIED', '无权完成其他人的上传', 403)
     if (detail.status !== 'uploading') {
@@ -45,8 +48,13 @@ export class SubmissionService {
     return completed
   }
 
-  list(): Promise<MarketplaceSubmissionSummary[]> { return this.repository.list() }
-  get(id: string): Promise<MarketplaceSubmissionDetail | undefined> { return this.repository.get(id) }
+  list(actor: MarketplaceAdminUser): Promise<MarketplaceSubmissionSummary[]> {
+    return this.repository.list(actor.role === 'editor' ? actor.githubLogin : undefined)
+  }
+  async get(id: string, actor: MarketplaceAdminUser): Promise<MarketplaceSubmissionDetail | undefined> {
+    const detail = await this.repository.get(id)
+    return detail && (actor.role !== 'editor' || detail.submittedBy === actor.githubLogin) ? detail : undefined
+  }
 }
 
 export class SubmissionError extends Error {
@@ -59,14 +67,20 @@ export class PostgresSubmissionRepository implements SubmissionRepository {
   private readonly sql: postgres.Sql
   constructor(databaseUrl: string) { this.sql = postgres(databaseUrl) }
   async findByIdempotencyKey(key: string, actor: string) { const rows = await this.sql<SubmissionRow[]>`SELECT * FROM marketplace_submissions WHERE idempotency_key=${key} AND submitted_by=${actor} LIMIT 1`; return rows[0] ? mapSubmission(rows[0]) : undefined }
-  async create(input: { id: string; objectKey: string; fileName: string; size: number; actor: string; idempotencyKey: string }) {
+  async create(input: { id: string; fileName: string; size: number; actor: string; idempotencyKey: string }) {
     const objectKey = quarantinePackageKey(input.id)
     const rows = await this.sql<SubmissionRow[]>`INSERT INTO marketplace_submissions (id, object_key, status, submitted_by, idempotency_key, file_name, package_size) VALUES (${input.id}, ${objectKey}, 'uploading', ${input.actor}, ${input.idempotencyKey}, ${input.fileName}, ${input.size}) RETURNING *`
     return mapSubmission(rows[0]!)
   }
   async complete(id: string, actor: string, sha256: string) { const rows = await this.sql<SubmissionRow[]>`UPDATE marketplace_submissions SET status='validating', sha256=${sha256}, updated_at=now() WHERE id=${id} AND submitted_by=${actor} AND status='uploading' RETURNING *`; return rows[0] ? mapSubmission(rows[0]) : undefined }
-  async list() { const rows = await this.sql<SubmissionRow[]>`SELECT * FROM marketplace_submissions ORDER BY created_at DESC LIMIT 100`; return rows.map(mapSubmission) }
+  async list(actor?: string) { const rows = await this.sql<SubmissionRow[]>`SELECT * FROM marketplace_submissions WHERE ${actor ? this.sql`submitted_by=${actor}` : this.sql`true`} ORDER BY created_at DESC LIMIT 100`; return rows.map(mapSubmission) }
   async get(id: string) {
+    const detail = await this.getInternal(id)
+    if (!detail) return undefined
+    const { objectKey: _objectKey, ...publicDetail } = detail
+    return publicDetail
+  }
+  async getInternal(id: string): Promise<SubmissionInternalRecord | undefined> {
     const rows = await this.sql<SubmissionRow[]>`SELECT * FROM marketplace_submissions WHERE id=${id} LIMIT 1`
     const row = rows[0]
     if (!row) return undefined

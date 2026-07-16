@@ -206,7 +206,6 @@ export interface MarketplaceCreateSubmissionInput {
 export interface MarketplaceCreateSubmissionResult {
   submission: MarketplaceSubmissionSummary
   uploadUrl: string
-  objectKey: string
   expiresAt: string
 }
 
@@ -222,7 +221,6 @@ export interface MarketplaceValidationIssue {
 }
 
 export interface MarketplaceSubmissionDetail extends MarketplaceSubmissionSummary {
-  objectKey: string
   sha256?: string
   validationIssues: MarketplaceValidationIssue[]
   manifest?: Record<string, unknown>
@@ -231,7 +229,14 @@ export interface MarketplaceSubmissionDetail extends MarketplaceSubmissionSummar
   examples?: unknown[]
 }
 
-export interface MarketplaceReviewDecisionInput { decision: 'approve' | 'reject'; reason?: string }
+export interface MarketplaceEditablePublishMetadata {
+  authorHandle: string
+  authorName: string
+  category: string
+  displayName: string
+  description: string
+}
+export interface MarketplaceReviewDecisionInput { decision: 'approve' | 'reject'; reason?: string; metadata?: MarketplaceEditablePublishMetadata }
 export interface MarketplaceReviewResult { submissionId: string; status: MarketplaceSubmissionStatus; publishedVersionId?: string }
 export interface MarketplaceAdminSkillSummary { id: string; slug: string; displayName: string; authorHandle: string; category: string; version: string; status: MarketplaceSkillStatus; installCount: number; updatedAt: string }
 export interface MarketplaceAdminVersionSummary { id: string; version: string; status: MarketplaceSkillStatus; sha256: string; createdAt: string; publishedAt?: string }
