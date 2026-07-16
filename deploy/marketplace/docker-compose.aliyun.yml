@@ -1,0 +1,11 @@
+services:
+  api:
+    image: ${ACR_IMAGE}:${RELEASE_TAG}
+    env_file: .env
+    restart: unless-stopped
+    ports: ["4310:4310"]
+  worker:
+    image: ${ACR_IMAGE}:${RELEASE_TAG}
+    env_file: .env
+    command: ["bun","run","--filter=@proma/marketplace-api","worker"]
+    restart: unless-stopped

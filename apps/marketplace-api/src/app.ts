@@ -39,6 +39,7 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
     status: 'ok',
     version: options.version ?? '0.1.0',
   }))
+  app.get('/api/v1/features', (context) => context.json(options.config.features))
 
   if (options.services) app.route('/api/v1', createMarketplacePublicRoutes(options.services))
   if (options.adminAuth && options.config.adminEnabled) {

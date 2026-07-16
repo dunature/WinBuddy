@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+Marketplace 开发需同时验证 API、Web、Electron 与统一 Domain Validator；内容位于 `marketplace-content/`，不得复制进 Electron `default-skills`。
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 **重要提示：**

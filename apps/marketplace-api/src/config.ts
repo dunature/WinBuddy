@@ -15,6 +15,9 @@ const configSchema = z.object({
   MARKETPLACE_GITHUB_CLIENT_SECRET: z.string().min(1).optional(),
   MARKETPLACE_SESSION_SECRET: z.string().min(32).optional(),
   MARKETPLACE_FEATURE_ADMIN: z.enum(['true', 'false']).default('false'),
+  MARKETPLACE_FEATURE_BROWSE: z.enum(['true','false']).default('false'),
+  MARKETPLACE_FEATURE_INSTALL: z.enum(['true','false']).default('false'),
+  MARKETPLACE_FEATURE_COMMUNITY: z.enum(['true','false']).default('false'),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 })
 
@@ -34,6 +37,7 @@ export interface MarketplaceApiConfig {
   apiPublicUrl: string
   githubOAuth?: { clientId: string; clientSecret: string; sessionSecret: string }
   adminEnabled: boolean
+  features: { browse:boolean;install:boolean;admin:boolean;community:boolean }
 }
 
 export function loadMarketplaceApiConfig(env: Record<string, string | undefined>): MarketplaceApiConfig {
@@ -63,6 +67,7 @@ export function loadMarketplaceApiConfig(env: Record<string, string | undefined>
     webUrl: parsed.data.MARKETPLACE_WEB_URL,
     apiPublicUrl: parsed.data.MARKETPLACE_API_PUBLIC_URL,
     adminEnabled,
+    features:{browse:parsed.data.MARKETPLACE_FEATURE_BROWSE==='true',install:parsed.data.MARKETPLACE_FEATURE_INSTALL==='true',admin:adminEnabled,community:parsed.data.MARKETPLACE_FEATURE_COMMUNITY==='true'},
     ...(oauthValues.every(Boolean) ? { githubOAuth: { clientId: oauthValues[0]!, clientSecret: oauthValues[1]!, sessionSecret: oauthValues[2]! } } : {}),
   }
 }

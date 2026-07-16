@@ -160,6 +160,9 @@ export interface AppSettings {
   mainWindowState?: MainWindowState
   /** 内部 Skill Marketplace 功能开关，Release Gate 前默认关闭 */
   marketplaceEnabled?: boolean
+  marketplaceBrowseEnabled?: boolean
+  marketplaceInstallEnabled?: boolean
+  marketplaceCommunityEnabled?: boolean
   /** Skill Marketplace API 地址，存储在 settings.json 而非渲染进程缓存 */
   marketplaceApiUrl?: string
 }
