@@ -13,6 +13,8 @@ import type {
   MarketplaceCreateSubmissionResult,
   MarketplaceSubmissionDetail,
   MarketplaceSubmissionSummary,
+  MarketplaceReviewDecisionInput,
+  MarketplaceReviewResult,
 } from '@proma/shared'
 
 const DEFAULT_API_URL = 'http://localhost:4310/api/v1'
@@ -63,6 +65,7 @@ export class MarketplaceApiClient {
   getSubmission(id: string, signal?: AbortSignal): Promise<MarketplaceSubmissionDetail> { return this.get(`/admin/submissions/${encodeURIComponent(id)}`, signal) }
   createSubmission(input: MarketplaceCreateSubmissionInput): Promise<MarketplaceCreateSubmissionResult> { return this.post('/admin/submissions', input) }
   completeSubmission(id: string, sha256: string): Promise<MarketplaceSubmissionSummary> { return this.post(`/admin/submissions/${encodeURIComponent(id)}/complete`, { sha256 }) }
+  decideSubmission(id: string, input: MarketplaceReviewDecisionInput): Promise<MarketplaceReviewResult> { return this.post(`/admin/submissions/${encodeURIComponent(id)}/decision`, input) }
 
   listCategories(signal?: AbortSignal): Promise<MarketplaceCategory[]> {
     return this.get('/categories', signal)

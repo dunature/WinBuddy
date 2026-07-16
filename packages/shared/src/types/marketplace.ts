@@ -224,4 +224,11 @@ export interface MarketplaceSubmissionDetail extends MarketplaceSubmissionSummar
   objectKey: string
   sha256?: string
   validationIssues: MarketplaceValidationIssue[]
+  manifest?: Record<string, unknown>
+  guideMarkdown?: string
+  files?: Array<{ path: string; size: number; kind: string; content?: string }>
+  examples?: unknown[]
 }
+
+export interface MarketplaceReviewDecisionInput { decision: 'approve' | 'reject'; reason?: string }
+export interface MarketplaceReviewResult { submissionId: string; status: MarketplaceSubmissionStatus; publishedVersionId?: string }

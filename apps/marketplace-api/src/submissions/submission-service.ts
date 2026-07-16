@@ -50,10 +50,10 @@ export class SubmissionService {
 }
 
 export class SubmissionError extends Error {
-  constructor(readonly code: 'PACKAGE_TOO_LARGE' | 'VALIDATION_FAILED' | 'SUBMISSION_NOT_FOUND' | 'ADMIN_ACCESS_DENIED' | 'SUBMISSION_STATE_CONFLICT' | 'UPLOAD_FAILED' | 'PACKAGE_HASH_MISMATCH', message: string, readonly status: number) { super(message) }
+  constructor(readonly code: 'PACKAGE_TOO_LARGE' | 'VALIDATION_FAILED' | 'SUBMISSION_NOT_FOUND' | 'ADMIN_ACCESS_DENIED' | 'SUBMISSION_STATE_CONFLICT' | 'UPLOAD_FAILED' | 'PACKAGE_HASH_MISMATCH' | 'REVIEW_REASON_REQUIRED' | 'PUBLISH_FAILED', message: string, readonly status: number) { super(message) }
 }
 
-interface SubmissionRow { id: string; object_key: string; file_name: string; package_size: number; sha256: string | null; status: MarketplaceSubmissionStatus; submitted_by: string; created_at: Date; updated_at: Date }
+interface SubmissionRow { id: string; object_key: string; file_name: string; package_size: number; sha256: string | null; status: MarketplaceSubmissionStatus; submitted_by: string; created_at: Date; updated_at: Date; manifest: unknown; guide_markdown: string | null; extracted_files: unknown; extracted_examples: unknown }
 
 export class PostgresSubmissionRepository implements SubmissionRepository {
   private readonly sql: postgres.Sql
@@ -71,9 +71,14 @@ export class PostgresSubmissionRepository implements SubmissionRepository {
     const row = rows[0]
     if (!row) return undefined
     const issues = await this.sql<{ severity: 'error' | 'warning'; code: string; message: string; path: string | null }[]>`SELECT i.severity, i.code, i.message, i.path FROM marketplace_validation_issues i JOIN marketplace_validation_runs r ON r.id=i.run_id WHERE r.submission_id=${id} ORDER BY i.severity, i.code`
-    return { ...mapSubmission(row), objectKey: row.object_key, ...(row.sha256 ? { sha256: row.sha256 } : {}), validationIssues: issues.map((issue) => ({ severity: issue.severity, code: issue.code, message: issue.message, ...(issue.path ? { path: issue.path } : {}) })) }
+    const manifest = record(row.manifest)
+    const files = Array.isArray(row.extracted_files) ? row.extracted_files.filter(isExtractedFile) : []
+    return { ...mapSubmission(row), objectKey: row.object_key, ...(row.sha256 ? { sha256: row.sha256 } : {}), ...(Object.keys(manifest).length ? { manifest } : {}), ...(row.guide_markdown ? { guideMarkdown: row.guide_markdown } : {}), files, examples: Array.isArray(row.extracted_examples) ? row.extracted_examples : [], validationIssues: issues.map((issue) => ({ severity: issue.severity, code: issue.code, message: issue.message, ...(issue.path ? { path: issue.path } : {}) })) }
   }
 }
+
+function record(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {} }
+function isExtractedFile(value: unknown): value is { path: string; size: number; kind: string; content?: string } { const item = record(value); return typeof item.path === 'string' && typeof item.size === 'number' && typeof item.kind === 'string' }
 
 function mapSubmission(row: SubmissionRow): MarketplaceSubmissionSummary & { packageSize: number } {
   return { id: row.id, fileName: row.file_name, packageSize: Number(row.package_size), status: row.status, submittedBy: row.submitted_by, createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString() }

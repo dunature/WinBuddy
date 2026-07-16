@@ -4,6 +4,7 @@ import { S3MarketplaceObjectStore } from './object-store/s3-object-store.ts'
 import { PostgresMarketplaceRepository } from './repository/postgres-marketplace-repository.ts'
 import { AdminAuthService, HttpGitHubOAuthClient, PostgresAdminAuthRepository } from './auth/admin-auth.ts'
 import { PostgresSubmissionRepository, SubmissionService } from './submissions/submission-service.ts'
+import { PostgresReviewService } from './reviews/review-service.ts'
 
 const config = loadMarketplaceApiConfig(process.env)
 const oauth = config.githubOAuth
@@ -21,6 +22,7 @@ const app = createMarketplaceApp({
   },
   ...(adminAuth ? { adminAuth } : {}),
   ...(adminAuth ? { submissions: new SubmissionService(new PostgresSubmissionRepository(config.databaseUrl), objectStore) } : {}),
+  ...(adminAuth ? { reviews: new PostgresReviewService(config.databaseUrl, objectStore) } : {}),
 })
 
 console.log(`[Marketplace API] 已启动：http://localhost:${config.port}`)
