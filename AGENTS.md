@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Marketplace 约束：管理上传必须经过 quarantine、持久化校验、人工审核和事务发布；不得直接 seed 已发布版本。四个生产 Feature Flag 默认关闭，Release Gate 未通过不得公开安装。
+Marketplace 约束：管理上传必须经过 quarantine、持久化校验、人工审核和事务发布；不得直接 seed 已发布版本。四个生产 Feature Flag 默认关闭，`docs/marketplace-release-gate.md` 的 12 项未全部通过不得公开安装。
 
 This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 

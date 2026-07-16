@@ -12,7 +12,7 @@ import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import AdmZip from 'adm-zip'
-import { DOMParser } from '@xmldom/xmldom'
+import { DOMParser, type Document as XmlDocument, type Element as XmlElement, type Node as XmlNode } from '@xmldom/xmldom'
 import type {
   FilePreviewNotice,
   LibreOfficeStatus,
@@ -177,20 +177,21 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;')
 }
 
-function parseXml(xml: string): Document {
+function parseXml(xml: string): XmlDocument {
   return new DOMParser().parseFromString(xml, 'application/xml')
 }
 
-function getElementsByLocalName(root: Node, localName: string): Element[] {
-  const result: Element[] = []
+function getElementsByLocalName(root: XmlNode, localName: string): XmlElement[] {
+  const result: XmlElement[] = []
 
-  function walk(node: Node): void {
+  function walk(node: XmlNode): void {
     const children = node.childNodes
     if (!children) return
     for (let i = 0; i < children.length; i++) {
       const child = children.item(i)
+      if (!child) continue
       if (child.nodeType === 1) {
-        const element = child as Element
+        const element = child as XmlElement
         if (element.localName === localName || element.nodeName === localName) {
           result.push(element)
         }
@@ -203,14 +204,15 @@ function getElementsByLocalName(root: Node, localName: string): Element[] {
   return result
 }
 
-function getDirectChildElementsByLocalName(root: Element | Document, localName: string): Element[] {
-  const result: Element[] = []
+function getDirectChildElementsByLocalName(root: XmlElement | XmlDocument, localName: string): XmlElement[] {
+  const result: XmlElement[] = []
   const children = root.childNodes
   if (!children) return result
   for (let i = 0; i < children.length; i++) {
     const child = children.item(i)
+    if (!child) continue
     if (child.nodeType !== 1) continue
-    const element = child as Element
+    const element = child as XmlElement
     if (element.localName === localName || element.nodeName === localName) {
       result.push(element)
     }
@@ -218,7 +220,7 @@ function getDirectChildElementsByLocalName(root: Element | Document, localName: 
   return result
 }
 
-function getFirstTextByLocalName(root: Element, localName: string): string {
+function getFirstTextByLocalName(root: XmlElement, localName: string): string {
   return getElementsByLocalName(root, localName)[0]?.textContent ?? ''
 }
 
@@ -354,7 +356,7 @@ function columnNameFromIndex(index: number): string {
   return name
 }
 
-function getXlsxCellValue(cell: Element, sharedStrings: string[], dateStyleIndexes: Set<number>): { value: string; formula?: string } {
+function getXlsxCellValue(cell: XmlElement, sharedStrings: string[], dateStyleIndexes: Set<number>): { value: string; formula?: string } {
   const type = cell.getAttribute('t')
   const formula = getFirstTextByLocalName(cell, 'f') || undefined
   if (type === 'inlineStr') {

@@ -1,6 +1,6 @@
 # Proma
 
-Skill Marketplace 当前处于内部 M3/M4 阶段：公共浏览、安装、管理与社区内容使用独立开关，生产默认关闭。管理服务命令为 `bun run --filter='@proma/marketplace-api' start|worker|db:migrate`，内容校验运行 `bun run marketplace:content:validate`。阿里云部署与回滚见 `docs/marketplace-aliyun-operations.md`。
+Skill Marketplace 当前处于内部 Release Gate：公共浏览、安装、管理与社区内容使用独立开关，生产默认关闭。管理服务命令为 `bun run --filter='@proma/marketplace-api' start|worker|db:migrate`，内容校验运行 `bun run marketplace:content:validate`。12 项放行状态见 `docs/marketplace-release-gate.md`，阿里云部署与回滚见 `docs/marketplace-aliyun-operations.md`。
 
 Proma 是一个本地优先的 AI 桌面应用，把多模型 Chat、通用 Agent、工作区、Skills、MCP、远程机器人和记忆能力放在同一个开源客户端里。
 

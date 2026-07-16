@@ -45,6 +45,8 @@ jobs:
         run: bun run typecheck
       - name: 全仓测试
         run: bun test
+      - name: 高危依赖审计
+        run: bun audit --audit-level=high
       - name: 校验首发内容
         run: bun run marketplace:content:validate
       - name: 构建 Marketplace API
@@ -101,4 +103,3 @@ jobs:
           echo '- 安装器逻辑测试：通过' >> "$GITHUB_STEP_SUMMARY"
           echo '- Electron main/preload/renderer：构建通过' >> "$GITHUB_STEP_SUMMARY"
           echo '- 桌面发行包：尚未完成 GUI、签名与发行验收，不标记为正式支持' >> "$GITHUB_STEP_SUMMARY"
-

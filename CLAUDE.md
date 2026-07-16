@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Marketplace 开发需同时验证 API、Web、Electron 与统一 Domain Validator；内容位于 `marketplace-content/`，不得复制进 Electron `default-skills`。
+Marketplace 开发需同时验证 API、Web、Electron 与统一 Domain Validator；内容位于 `marketplace-content/`，不得复制进 Electron `default-skills`。Release Gate 结果必须记录到 `docs/marketplace-release-gate.md`，跨平台 CI 未实际通过时不得标记 Ready。
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 

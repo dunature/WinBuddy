@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type {
+  SDKMessage,
   SDKResultMessage,
   UsageModelBreakdown,
   UsageRecord,
@@ -33,6 +34,16 @@ export interface NormalizeChatUsageInput {
   status: UsageStatus
   durationMs?: number
   requestIndex: number
+}
+
+export function isSDKResultMessage(message: SDKMessage): message is SDKResultMessage {
+  if (message.type !== 'result') return false
+  const candidate = message as Record<string, unknown>
+  const usage = candidate.usage
+  if (typeof candidate.subtype !== 'string' || !usage || typeof usage !== 'object') return false
+  const usageRecord = usage as Record<string, unknown>
+  return typeof usageRecord.input_tokens === 'number'
+    && typeof usageRecord.output_tokens === 'number'
 }
 
 function stableId(sourceKey: string): string {

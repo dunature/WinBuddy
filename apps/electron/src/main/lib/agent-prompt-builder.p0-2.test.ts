@@ -9,7 +9,7 @@ import { describe, test, expect } from 'bun:test'
 import { buildSystemPrompt } from './agent-prompt-builder'
 
 /** 构建测试用的系统提示词 */
-function getTestSystemPrompt(mode: 'allow-all' | 'plan' | 'safe' = 'allow-all') {
+function getTestSystemPrompt(mode: 'bypassPermissions' | 'plan' = 'bypassPermissions') {
   return buildSystemPrompt({
     sessionId: 'test-session-p0-2',
     permissionMode: mode,
@@ -126,18 +126,13 @@ describe('P0-2 意图确认规则 — 系统提示词内容验证', () => {
 
   // ===== 7. 不同权限模式下的兼容性 =====
 
-  test('allow-all 模式下包含意图确认规则', () => {
-    const prompt = getTestSystemPrompt('allow-all')
+  test('bypassPermissions 模式下包含意图确认规则', () => {
+    const prompt = getTestSystemPrompt('bypassPermissions')
     expect(prompt).toContain('意图确认与结构化选项')
   })
 
   test('plan 模式下包含意图确认规则', () => {
     const prompt = getTestSystemPrompt('plan')
-    expect(prompt).toContain('意图确认与结构化选项')
-  })
-
-  test('safe 模式下包含意图确认规则', () => {
-    const prompt = getTestSystemPrompt('safe')
     expect(prompt).toContain('意图确认与结构化选项')
   })
 

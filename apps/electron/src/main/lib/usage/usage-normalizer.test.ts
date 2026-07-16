@@ -1,8 +1,20 @@
 import { describe, expect, test } from 'bun:test'
-import type { SDKResultMessage } from '@proma/shared'
-import { normalizeAgentUsage, normalizeChatUsage } from './usage-normalizer'
+import type { SDKMessage, SDKResultMessage } from '@proma/shared'
+import { isSDKResultMessage, normalizeAgentUsage, normalizeChatUsage } from './usage-normalizer'
 
 describe('usage normalizer', () => {
+  test('只接受包含完整 usage 的 SDK result 消息', () => {
+    const valid: SDKMessage = {
+      type: 'result',
+      subtype: 'success',
+      usage: { input_tokens: 1, output_tokens: 2 },
+    }
+    const incomplete: SDKMessage = { type: 'result' }
+
+    expect(isSDKResultMessage(valid)).toBe(true)
+    expect(isSDKResultMessage(incomplete)).toBe(false)
+  })
+
   test('normalizes Agent result usage without flattening missing cost to zero', () => {
     const result: SDKResultMessage = {
       type: 'result',

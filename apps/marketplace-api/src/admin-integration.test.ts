@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import AdmZip from 'adm-zip'
 import postgres from 'postgres'
@@ -14,6 +17,7 @@ import { PostgresMarketplaceRepository } from './repository/postgres-marketplace
 import { PostgresReviewService } from './reviews/review-service.ts'
 import { PostgresSubmissionRepository, SubmissionService } from './submissions/submission-service.ts'
 import { MarketplaceValidationRunner, PostgresValidationRepository } from './validation/validation-runner.ts'
+import { buildMarketplaceContentPackages } from '../../../marketplace-content/package.ts'
 
 const ADMIN_DATABASE_URL = process.env.MARKETPLACE_TEST_ADMIN_DATABASE_URL ?? (process.env.CI ? undefined : 'postgres://localhost/postgres')
 const DATABASE_NAME = `proma_marketplace_test_${randomUUID().replaceAll('-', '')}`
@@ -165,6 +169,26 @@ describePostgres('Marketplace PostgreSQL 管理链路', () => {
     const all = await adminRequest<MarketplaceSubmissionSummary[]>('/api/v1/admin/submissions')
     expect(all.some((item) => item.submittedBy === 'other-editor')).toBe(true)
   })
+
+  test('15 个首发内容包逐包经过上传、校验、审核与发布', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'proma-marketplace-release-content-'))
+    try {
+      const packages = buildMarketplaceContentPackages(directory)
+      expect(packages).toHaveLength(15)
+      for (const candidate of packages) {
+        const created = await uploadBufferAndValidate(`${candidate.slug}.zip`, readFileSync(candidate.zipPath))
+        currentUser = reviewer
+        const reviewed = await adminRequest<MarketplaceReviewResult>(`/api/v1/admin/submissions/${created.submission.id}/decision`, {
+          method: 'POST',
+          body: JSON.stringify({ decision: 'approve' }),
+        })
+        expect(reviewed.status, candidate.slug).toBe('published')
+        expect((await app.request(`/api/v1/skills/${candidate.slug}`)).status, candidate.slug).toBe(200)
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  }, 60_000)
 })
 
 async function adminRequest<T = unknown>(path: string, init?: RequestInit): Promise<T> {
@@ -178,11 +202,15 @@ async function rawAdminRequest(path: string, init?: RequestInit): Promise<Respon
 }
 
 async function uploadAndValidate(version: string): Promise<MarketplaceCreateSubmissionResult> {
-  currentUser = editor
   const zip = packageZip(version)
+  return uploadBufferAndValidate(`integration-skill-${version}.zip`, zip)
+}
+
+async function uploadBufferAndValidate(fileName: string, zip: Uint8Array): Promise<MarketplaceCreateSubmissionResult> {
+  currentUser = editor
   const created = await adminRequest<MarketplaceCreateSubmissionResult>('/api/v1/admin/submissions', {
     method: 'POST',
-    body: JSON.stringify({ fileName: `integration-skill-${version}.zip`, size: zip.byteLength, idempotencyKey: randomUUID() }),
+    body: JSON.stringify({ fileName, size: zip.byteLength, idempotencyKey: randomUUID() }),
   })
   await objects.putPackage(quarantinePackageKey(created.submission.id), zip)
   await adminRequest<MarketplaceSubmissionSummary>(`/api/v1/admin/submissions/${created.submission.id}/complete`, {
