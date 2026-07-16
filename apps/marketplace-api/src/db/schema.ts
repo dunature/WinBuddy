@@ -90,6 +90,10 @@ export const marketplaceSubmissions = pgTable('marketplace_submissions', {
   fileName: text('file_name').notNull().default('package.zip'),
   packageSize: bigint('package_size', { mode: 'number' }).notNull().default(0),
   sha256: text('sha256'),
+  manifest: jsonb('manifest'),
+  guideMarkdown: text('guide_markdown'),
+  extractedFiles: jsonb('extracted_files'),
+  extractedExamples: jsonb('extracted_examples'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [uniqueIndex('marketplace_submissions_idempotency_uidx').on(table.idempotencyKey)])
