@@ -5,11 +5,12 @@
  * - conversations: 对话视图（Chat/Agent 模式内容）
  * - automations: 定时任务列表视图
  * - agent-skills: Agent 技能（Skills/MCP）全屏管理视图
+ * - skill-market: Agent 技能市场全屏浏览视图
  */
 
 import { atom } from 'jotai'
 
-export type ActiveView = 'conversations' | 'automations' | 'agent-skills'
+export type ActiveView = 'conversations' | 'automations' | 'agent-skills' | 'skill-market'
 export type AgentSkillsCapabilityTab = 'skills' | 'mcp' | 'memory'
 
 /** 当前活跃视图（不持久化，每次启动默认显示对话） */
