@@ -1,11 +1,18 @@
 import * as React from 'react'
 import { useAtom } from 'jotai'
-import { ArrowLeft, File, Folder, History, ShieldCheck, Star } from 'lucide-react'
-import { useNavigate, useParams } from 'react-router'
+import { ArrowLeft, File, Folder, ShieldCheck, Star } from 'lucide-react'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import type { MarketplaceFileNode } from '@proma/shared'
-import { marketplaceStateAtom, type MarketplaceDetailTab } from '@/atoms/marketplace-atoms'
+import { marketplaceStateAtom } from '@/atoms/marketplace-atoms'
+import {
+  createMarketplaceMemoryEntries,
+  readMarketplaceDetailRoute,
+  writeMarketplaceDetailRoute,
+  type MarketplaceDetailTab,
+} from '@/atoms/marketplace-route'
 import { cn } from '@/lib/utils'
 import { MarketplaceMarkdown } from './MarketplaceMarkdown'
+import { MarketplaceVersionHistory } from './MarketplaceVersionHistory'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '技能详情暂时无法访问'
@@ -62,9 +69,19 @@ const tabs: Array<{ id: MarketplaceDetailTab; label: string }> = [
 export function MarketplaceSkillDetailPage(): React.ReactElement {
   const { identifier = '' } = useParams()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [state, setState] = useAtom(marketplaceStateAtom)
+  const route = React.useMemo(() => readMarketplaceDetailRoute(searchParams), [searchParams])
   const detail = state.selectedIdentifier === identifier ? state.selectedSkill : null
   const latest = detail?.versions.find((version) => version.version === detail.latestVersion)
+  const activeVersion = detail?.versions.find((version) => version.version === (route.version ?? detail.latestVersion)) ?? latest
+  const catalogEntry = createMarketplaceMemoryEntries({
+    query: state.query,
+    category: state.category,
+    featured: state.featured,
+    sort: state.sort,
+    page: state.page,
+  })[0]
 
   React.useEffect(() => {
     let cancelled = false
@@ -73,7 +90,8 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
       selectedIdentifier: identifier,
       selectedSkill: null,
       selectedFile: null,
-      selectedTab: 'overview',
+      selectedTab: route.tab,
+      selectedVersion: route.version,
       detailLoading: true,
       detailError: null,
     }))
@@ -87,24 +105,52 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
     return () => { cancelled = true }
   }, [identifier, setState])
 
-  const openFile = React.useCallback((path: string) => {
+  const openFile = React.useCallback((path: string, version: string) => {
     if (!detail) return
     setState((current) => ({ ...current, detailLoading: true, detailError: null }))
-    window.electronAPI.getMarketplaceSkillFile(detail.identifier, detail.latestVersion, path)
+    window.electronAPI.getMarketplaceSkillFile(detail.identifier, version, path)
       .then((file) => setState((current) => ({ ...current, selectedFile: file, detailLoading: false })))
       .catch((error: unknown) => setState((current) => ({ ...current, detailLoading: false, detailError: errorMessage(error) })))
   }, [detail, setState])
 
   React.useEffect(() => {
-    if (state.selectedTab === 'skill-md' && detail && state.selectedFile?.path !== 'SKILL.md') {
-      openFile('SKILL.md')
+    if (!detail || !activeVersion) return
+    const shouldLoadFile = route.tab === 'skill-md' || route.tab === 'files'
+    setState((current) => ({
+      ...current,
+      selectedTab: route.tab,
+      selectedVersion: activeVersion.version,
+      selectedFile: null,
+    }))
+    if (shouldLoadFile && route.file) {
+      openFile(route.file, activeVersion.version)
     }
-  }, [detail, openFile, state.selectedFile?.path, state.selectedTab])
+  }, [activeVersion, detail, openFile, route.file, route.tab, setState])
+
+  const selectTab = React.useCallback((tab: MarketplaceDetailTab) => {
+    setSearchParams(writeMarketplaceDetailRoute({
+      tab,
+      file: tab === 'skill-md' || tab === 'files' ? route.file ?? 'SKILL.md' : null,
+      version: route.version,
+    }))
+  }, [route.file, route.version, setSearchParams])
+
+  const selectFile = React.useCallback((path: string) => {
+    setSearchParams(writeMarketplaceDetailRoute({ ...route, tab: 'files', file: path }))
+  }, [route, setSearchParams])
+
+  const selectVersion = React.useCallback((version: string) => {
+    setSearchParams(writeMarketplaceDetailRoute({
+      tab: 'files',
+      file: 'SKILL.md',
+      version: version === detail?.latestVersion ? null : version,
+    }))
+  }, [detail?.latestVersion, setSearchParams])
 
   return (
     <div className="h-full overflow-y-auto bg-gradient-to-b from-primary/[0.045] via-background to-background titlebar-no-drag">
       <div className="mx-auto max-w-6xl px-7 pb-12 pt-7">
-        <button type="button" onClick={() => navigate('/')} className="mb-6 flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+        <button type="button" onClick={() => navigate(catalogEntry)} className="mb-6 flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft size={16} /> 返回技能市场
         </button>
 
@@ -145,10 +191,10 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
                 <button
                   key={tab.id}
                   type="button"
-                  onClick={() => setState((current) => ({ ...current, selectedTab: tab.id, selectedFile: tab.id === 'files' ? current.selectedFile : null }))}
+                  onClick={() => selectTab(tab.id)}
                   className={cn(
                     'rounded-lg px-4 py-2 text-sm font-medium transition',
-                    state.selectedTab === tab.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                    route.tab === tab.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
                   {tab.label}
@@ -157,7 +203,7 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
             </div>
 
             <section className="mt-4 min-h-[360px] rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border/45">
-              {state.selectedTab === 'overview' && (
+              {route.tab === 'overview' && (
                 <div className="grid gap-7 md:grid-cols-[1fr_260px]">
                   <div>
                     <h2 className="font-semibold">关于此技能</h2>
@@ -176,7 +222,7 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
                 </div>
               )}
 
-              {state.selectedTab === 'skill-md' && (
+              {route.tab === 'skill-md' && (
                 state.detailLoading && !state.selectedFile ? (
                   <div className="h-48 animate-pulse rounded-xl bg-muted/55" />
                 ) : state.selectedFile?.content ? (
@@ -186,11 +232,11 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
                 )
               )}
 
-              {state.selectedTab === 'files' && latest && (
+              {route.tab === 'files' && activeVersion && (
                 <div className="grid min-h-[320px] gap-5 md:grid-cols-[280px_1fr]">
                   <div className="border-r border-border/55 pr-4">
-                    <h2 className="mb-3 text-sm font-semibold">v{latest.version} 文件</h2>
-                    <FileTree nodes={latest.files} onOpen={openFile} />
+                    <h2 className="mb-3 text-sm font-semibold">v{activeVersion.version} 文件</h2>
+                    <FileTree nodes={activeVersion.files} onOpen={selectFile} />
                   </div>
                   <div className="min-w-0">
                     {state.selectedFile?.content ? (
@@ -207,18 +253,12 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
                 </div>
               )}
 
-              {state.selectedTab === 'versions' && (
-                <div className="space-y-3">
-                  {detail.versions.map((version) => (
-                    <div key={version.version} className="flex gap-4 rounded-xl bg-muted/40 p-4">
-                      <div className="mt-0.5 rounded-lg bg-background p-2 shadow-sm"><History size={16} /></div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-3"><span className="font-medium">v{version.version}</span><span className="text-xs text-muted-foreground">{new Date(version.publishedAt).toLocaleDateString('zh-CN')}</span></div>
-                        <p className="mt-1 text-sm text-muted-foreground">{version.changelog}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              {route.tab === 'versions' && (
+                <MarketplaceVersionHistory
+                  versions={detail.versions}
+                  latestVersion={detail.latestVersion}
+                  onSelect={selectVersion}
+                />
               )}
             </section>
           </>

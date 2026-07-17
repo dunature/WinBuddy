@@ -8,8 +8,7 @@ import type {
   MarketplaceSkillSummary,
   MarketplaceSort,
 } from '@proma/shared'
-
-export type MarketplaceDetailTab = 'overview' | 'skill-md' | 'files' | 'versions'
+import type { MarketplaceDetailTab } from './marketplace-route'
 
 export interface MarketplaceState {
   searchInput: string
@@ -24,6 +23,7 @@ export interface MarketplaceState {
   pageInfo: MarketplacePageInfo
   selectedIdentifier: string | null
   selectedTab: MarketplaceDetailTab
+  selectedVersion: string | null
   selectedSkill: MarketplaceSkillDetail | null
   selectedFile: MarketplaceSkillFile | null
   loading: boolean
@@ -46,6 +46,7 @@ export const initialMarketplaceState: MarketplaceState = {
   pageInfo: { number: 1, size: 16, total: 0, pages: 1 },
   selectedIdentifier: null,
   selectedTab: 'overview',
+  selectedVersion: null,
   selectedSkill: null,
   selectedFile: null,
   loading: false,

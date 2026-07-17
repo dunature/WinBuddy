@@ -1,8 +1,9 @@
 import * as React from 'react'
 import { useAtom } from 'jotai'
-import { useNavigate } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { ChevronLeft, ChevronRight, Search, Sparkles, Store, WifiOff } from 'lucide-react'
 import { marketplaceStateAtom, toMarketplaceListQuery } from '@/atoms/marketplace-atoms'
+import { readMarketplaceCatalogRoute, writeMarketplaceCatalogRoute } from '@/atoms/marketplace-route'
 import { cn } from '@/lib/utils'
 
 function errorMessage(error: unknown): string {
@@ -22,6 +23,24 @@ function CatalogSkeleton(): React.ReactElement {
 export function MarketplaceCatalogPage(): React.ReactElement {
   const [state, setState] = useAtom(marketplaceStateAtom)
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const route = React.useMemo(() => readMarketplaceCatalogRoute(searchParams), [searchParams])
+
+  React.useEffect(() => {
+    setState((current) => ({
+      ...current,
+      searchInput: route.query,
+      query: route.query,
+      category: route.category,
+      featured: route.featured,
+      sort: route.sort,
+      page: route.page,
+      selectedIdentifier: null,
+      selectedSkill: null,
+      selectedFile: null,
+      selectedVersion: null,
+    }))
+  }, [route.category, route.featured, route.page, route.query, route.sort, setState])
 
   React.useEffect(() => {
     let cancelled = false
@@ -37,17 +56,25 @@ export function MarketplaceCatalogPage(): React.ReactElement {
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => {
-      setState((current) => current.query === current.searchInput.trim()
-        ? current
-        : { ...current, query: current.searchInput.trim(), page: 1 })
+      const query = state.searchInput.trim()
+      if (query !== route.query) {
+        setSearchParams(writeMarketplaceCatalogRoute({ ...route, query, page: 1 }), { replace: true })
+      }
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [state.searchInput, setState])
+  }, [route, setSearchParams, state.searchInput])
 
   React.useEffect(() => {
     let cancelled = false
     setState((current) => ({ ...current, loading: true, error: null }))
-    window.electronAPI.listMarketplaceSkills(toMarketplaceListQuery(state))
+    window.electronAPI.listMarketplaceSkills(toMarketplaceListQuery({
+      ...state,
+      query: route.query,
+      category: route.category,
+      featured: route.featured,
+      sort: route.sort,
+      page: route.page,
+    }))
       .then((result) => {
         if (!cancelled) {
           setState((current) => ({
@@ -62,7 +89,7 @@ export function MarketplaceCatalogPage(): React.ReactElement {
         if (!cancelled) setState((current) => ({ ...current, loading: false, error: errorMessage(error) }))
       })
     return () => { cancelled = true }
-  }, [state.query, state.category, state.featured, state.sort, state.page, state.pageSize, state.refreshVersion, setState])
+  }, [route.category, route.featured, route.page, route.query, route.sort, state.pageSize, state.refreshVersion, setState])
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-gradient-to-b from-primary/[0.055] via-background to-background">
@@ -91,7 +118,7 @@ export function MarketplaceCatalogPage(): React.ReactElement {
             </label>
             <button
               type="button"
-              onClick={() => setState((current) => ({ ...current, featured: !current.featured, page: 1 }))}
+              onClick={() => setSearchParams(writeMarketplaceCatalogRoute({ ...route, featured: !route.featured, page: 1 }))}
               className={cn(
                 'flex h-10 items-center gap-2 rounded-xl px-3 text-sm shadow-sm ring-1 transition',
                 state.featured
@@ -103,7 +130,11 @@ export function MarketplaceCatalogPage(): React.ReactElement {
             </button>
             <select
               value={state.sort}
-              onChange={(event) => setState((current) => ({ ...current, sort: event.target.value === 'latest' ? 'latest' : 'hot', page: 1 }))}
+              onChange={(event) => setSearchParams(writeMarketplaceCatalogRoute({
+                ...route,
+                sort: event.target.value === 'latest' ? 'latest' : 'hot',
+                page: 1,
+              }))}
               className="h-10 rounded-xl bg-background/90 px-3 text-sm text-foreground shadow-sm ring-1 ring-border/60 outline-none"
             >
               <option value="hot">最受欢迎</option>
@@ -116,7 +147,7 @@ export function MarketplaceCatalogPage(): React.ReactElement {
               <button
                 key={category.id || 'all'}
                 type="button"
-                onClick={() => setState((current) => ({ ...current, category: category.id, page: 1 }))}
+                onClick={() => setSearchParams(writeMarketplaceCatalogRoute({ ...route, category: category.id, page: 1 }))}
                 className={cn(
                   'rounded-full px-3 py-1.5 text-xs font-medium transition',
                   state.category === category.id
@@ -186,7 +217,7 @@ export function MarketplaceCatalogPage(): React.ReactElement {
               <button
                 type="button"
                 disabled={state.pageInfo.number <= 1}
-                onClick={() => setState((current) => ({ ...current, page: Math.max(1, current.page - 1) }))}
+                onClick={() => setSearchParams(writeMarketplaceCatalogRoute({ ...route, page: Math.max(1, route.page - 1) }))}
                 className="flex size-9 items-center justify-center rounded-lg bg-card shadow-sm ring-1 ring-border/50 disabled:opacity-35"
               >
                 <ChevronLeft size={16} />
@@ -195,7 +226,7 @@ export function MarketplaceCatalogPage(): React.ReactElement {
               <button
                 type="button"
                 disabled={state.pageInfo.number >= state.pageInfo.pages}
-                onClick={() => setState((current) => ({ ...current, page: Math.min(current.page + 1, current.pageInfo.pages) }))}
+                onClick={() => setSearchParams(writeMarketplaceCatalogRoute({ ...route, page: Math.min(route.page + 1, state.pageInfo.pages) }))}
                 className="flex size-9 items-center justify-center rounded-lg bg-card shadow-sm ring-1 ring-border/50 disabled:opacity-35"
               >
                 <ChevronRight size={16} />
