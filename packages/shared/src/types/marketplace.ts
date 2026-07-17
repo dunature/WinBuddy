@@ -1,0 +1,82 @@
+/** 技能市场分类。 */
+export interface MarketplaceCategory {
+  id: string
+  name: string
+  icon: string
+}
+
+export type MarketplaceSort = 'hot' | 'latest'
+
+export interface MarketplaceListQuery {
+  query?: string
+  category?: string
+  featured?: boolean
+  sort: MarketplaceSort
+  page: number
+  pageSize: number
+}
+
+export interface MarketplacePageInfo {
+  number: number
+  size: number
+  total: number
+  pages: number
+}
+
+export interface MarketplacePage<T> {
+  items: T[]
+  page: MarketplacePageInfo
+}
+
+export interface MarketplaceSkillSummary {
+  id: string
+  identifier: string
+  name: string
+  tagline: string
+  authorName: string
+  category: string
+  tags: string[]
+  icon: string
+  featured: boolean
+  installs: number
+  latestVersion: string
+  updatedAt: string
+}
+
+export interface MarketplaceFileNode {
+  path: string
+  name: string
+  type: 'file' | 'directory'
+  size: number
+  children?: MarketplaceFileNode[]
+}
+
+export interface MarketplaceVersionSummary {
+  version: string
+  changelog: string
+  sha256: string
+  size: number
+  fileCount: number
+  publishedAt: string
+  files: MarketplaceFileNode[]
+}
+
+export interface MarketplaceSkillDetail extends MarketplaceSkillSummary {
+  description: string
+  authorUrl?: string
+  versions: MarketplaceVersionSummary[]
+}
+
+export interface MarketplaceSkillFile {
+  path: string
+  size: number
+  content?: string
+  isText: boolean
+}
+
+export const MARKETPLACE_IPC_CHANNELS = {
+  LIST_CATEGORIES: 'marketplace:list-categories',
+  LIST_SKILLS: 'marketplace:list-skills',
+  GET_SKILL: 'marketplace:get-skill',
+  GET_SKILL_FILE: 'marketplace:get-skill-file',
+} as const

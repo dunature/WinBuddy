@@ -59,3 +59,6 @@ export * from './usage'
 
 // 提示词优化相关类型
 export * from './prompt-optimization'
+
+// 技能市场相关类型
+export * from './marketplace'
