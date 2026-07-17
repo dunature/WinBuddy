@@ -67,7 +67,7 @@ export function writeMarketplaceDetailRoute(route: MarketplaceDetailRoute): URLS
 export function createMarketplaceMemoryEntries(
   catalogRoute: MarketplaceCatalogRoute,
   detailEntry?: MarketplaceDetailEntry,
-): string[] {
+): [string, ...string[]] {
   const catalogSearch = writeMarketplaceCatalogRoute(catalogRoute).toString()
   const catalogEntry = catalogSearch ? `/?${catalogSearch}` : '/'
   if (!detailEntry) return [catalogEntry]
