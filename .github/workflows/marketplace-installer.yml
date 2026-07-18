@@ -39,8 +39,8 @@ jobs:
       - name: 安装依赖
         run: bun install --frozen-lockfile
 
-      - name: 验证安装生命周期
-        run: bun test apps/electron/src/main/lib/marketplace-installer.test.ts apps/electron/src/main/lib/marketplace-installer.integration.test.ts
+      - name: 验证安装与工作区生命周期
+        run: bun test apps/electron/src/main/lib/marketplace-installer.test.ts apps/electron/src/main/lib/marketplace-installer.integration.test.ts apps/electron/src/main/lib/marketplace-skill-lifecycle.test.ts apps/electron/src/main/lib/marketplace-skill-lifecycle-ipc.test.ts apps/electron/src/renderer/atoms/marketplace-atoms.test.ts apps/electron/src/renderer/components/marketplace/marketplace-agent-use.test.ts apps/electron/src/renderer/components/marketplace/MarketplaceSkillDetailPage.test.ts apps/electron/src/renderer/components/agent-skills/SkillCard.test.tsx
 
       - name: 类型检查共享契约与 Electron
         run: bun run --filter='@proma/shared' typecheck && bun run --filter='@proma/electron' typecheck
