@@ -105,6 +105,39 @@ export interface MarketplaceInstallManifest {
   downloadUrl?: string
 }
 
+export type MarketplaceInstallAction = 'install' | 'update'
+export type MarketplaceInstallPhase =
+  | 'queued'
+  | 'downloading'
+  | 'verifying'
+  | 'extracting'
+  | 'committing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export interface MarketplaceInstallRequest {
+  workspaceSlug: string
+  marketplaceSkillId: string
+  version: string
+}
+
+export interface MarketplaceInstallState extends MarketplaceInstallRequest {
+  installId: string
+  action: MarketplaceInstallAction
+  phase: MarketplaceInstallPhase
+  identifier?: string
+  error?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MarketplaceInstallStatus {
+  installId: string
+  phase: MarketplaceInstallPhase
+  error?: string
+}
+
 export interface MarketplaceAdminIdentity {
   username: string
   mustChangePassword: boolean
@@ -211,4 +244,11 @@ export const MARKETPLACE_IPC_CHANNELS = {
   LIST_SKILLS: 'marketplace:list-skills',
   GET_SKILL: 'marketplace:get-skill',
   GET_SKILL_FILE: 'marketplace:get-skill-file',
+  LIST_INSTALLS: 'marketplace:list-installs',
+  GET_INSTALL: 'marketplace:get-install',
+  GET_INSTALL_STATUS: 'marketplace:get-install-status',
+  INSTALL: 'marketplace:install',
+  UPDATE: 'marketplace:update',
+  CANCEL: 'marketplace:cancel',
+  INSTALL_PROGRESS: 'marketplace:install-progress',
 } as const

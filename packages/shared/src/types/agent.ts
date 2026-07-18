@@ -802,12 +802,25 @@ export interface WorkspaceMcpConfig {
 // ===== Skill 元数据 =====
 
 /** 从其他工作区导入的 Skill 来源元数据 */
-export interface SkillImportSource {
+export interface WorkspaceSkillImportSource {
+  kind: 'workspace'
   sourceWorkspaceSlug: string
   sourceWorkspaceName: string
   importedAt: string        // ISO 8601
   sourceVersion: string     // 导入时源 Skill 的 version，无则 '0.0.0'
 }
+
+/** 从技能市场安装的 Skill 来源元数据 */
+export interface MarketplaceSkillImportSource {
+  kind: 'marketplace'
+  marketplaceSkillId: string
+  identifier: string
+  installedVersion: string
+  contentHash: string
+  installedAt: string
+}
+
+export type SkillImportSource = WorkspaceSkillImportSource | MarketplaceSkillImportSource
 
 /** 工作区 Skill 元数据 */
 export interface SkillMeta {
@@ -821,7 +834,7 @@ export interface SkillMeta {
   enabled: boolean
   /** 如果此 Skill 是从其他工作区导入的，则携带来源信息 */
   importSource?: SkillImportSource
-  /** 是否有可用更新（源 Skill 版本 > importSource.sourceVersion） */
+  /** 工作区来源是否有可用更新（源 Skill 版本 > importSource.sourceVersion） */
   hasUpdate?: boolean
 }
 
