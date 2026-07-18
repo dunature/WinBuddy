@@ -157,6 +157,10 @@ export interface ElectronAPI {
   getMarketplaceSkill: (identifier: string) => Promise<import('@proma/shared').MarketplaceSkillDetail>
   getMarketplaceSkillFile: (identifier: string, version: string, path: string) => Promise<import('@proma/shared').MarketplaceSkillFile>
   listMarketplaceInstalls: () => Promise<import('@proma/shared').MarketplaceInstallState[]>
+  listInstalledMarketplaceSkills: (workspaceSlug: string) => Promise<import('@proma/shared').MarketplaceInstalledSkill[]>
+  getInstalledMarketplaceSkill: (request: import('@proma/shared').MarketplaceInstalledSkillRequest) => Promise<import('@proma/shared').MarketplaceInstalledSkill | undefined>
+  setInstalledMarketplaceSkillEnabled: (request: import('@proma/shared').MarketplaceToggleInstalledSkillRequest) => Promise<import('@proma/shared').MarketplaceInstalledSkill>
+  uninstallMarketplaceSkill: (request: import('@proma/shared').MarketplaceInstalledSkillRequest) => Promise<import('@proma/shared').MarketplaceInstalledSkill>
   getMarketplaceInstall: (installId: string) => Promise<import('@proma/shared').MarketplaceInstallState | undefined>
   getMarketplaceInstallStatus: (installId: string) => Promise<import('@proma/shared').MarketplaceInstallStatus | undefined>
   installMarketplaceSkill: (request: import('@proma/shared').MarketplaceInstallRequest) => Promise<import('@proma/shared').MarketplaceInstallState>
@@ -1137,6 +1141,14 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.GET_SKILL_FILE, identifier, version, path),
   listMarketplaceInstalls: () =>
     ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.LIST_INSTALLS),
+  listInstalledMarketplaceSkills: (workspaceSlug) =>
+    ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.LIST_INSTALLED_SKILLS, workspaceSlug),
+  getInstalledMarketplaceSkill: (request) =>
+    ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.GET_INSTALLED_SKILL, request),
+  setInstalledMarketplaceSkillEnabled: (request) =>
+    ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.SET_INSTALLED_SKILL_ENABLED, request),
+  uninstallMarketplaceSkill: (request) =>
+    ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.UNINSTALL_SKILL, request),
   getMarketplaceInstall: (installId) =>
     ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.GET_INSTALL, installId),
   getMarketplaceInstallStatus: (installId) =>
