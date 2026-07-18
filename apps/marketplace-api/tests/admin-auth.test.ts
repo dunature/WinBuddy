@@ -264,7 +264,8 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 管理员认证（真实 Postgre
       headers: { ...authHeaders, origin: allowedOrigin, 'x-csrf-token': login.data.csrfToken },
       body: '{}',
     })
-    expect(protectedResponse.status).toBe(404)
+    expect(protectedResponse.status).toBe(400)
+    expect((await readJson<MarketplaceApiError>(protectedResponse)).error.code).toBe('INVALID_REQUEST')
 
     const csrfRows = await sql<{ csrf_token_hash: string }[]>`SELECT csrf_token_hash FROM admin_sessions`
     expect(JSON.stringify(csrfRows)).not.toContain(login.data.csrfToken)

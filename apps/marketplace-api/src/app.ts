@@ -4,6 +4,7 @@ import { serveStatic } from 'hono/bun'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { MARKETPLACE_MAX_TEXT_PREVIEW_BYTES } from '@proma/marketplace-domain'
 import type { MarketplaceDatabase } from './database/client'
+import { createMarketplaceAdminDraftRouter } from './admin-draft-routes'
 import {
   ADMIN_CSRF_COOKIE,
   ADMIN_LOGIN_CSRF_COOKIE,
@@ -28,7 +29,7 @@ import {
   listPublicSkills,
 } from './public-catalog'
 
-interface MarketplaceAppEnv {
+export interface MarketplaceAppEnv {
   Variables: {
     requestId: string
     adminSession: AuthenticatedAdminSession
@@ -296,6 +297,8 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
     deleteCookie(context, ADMIN_CSRF_COOKIE, { path: '/', secure: true })
     return context.json({ data: { loggedOut: true }, requestId: context.get('requestId') })
   })
+
+  app.route('/api/v1/admin', createMarketplaceAdminDraftRouter(options.database))
 
   app.get('/api/v1/marketplace/categories', async (context) => context.json({
     data: await listPublicCategories(options.database),
