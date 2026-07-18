@@ -69,6 +69,40 @@ export function withMarketplaceInstallState(
   return next
 }
 
+const marketplaceInstallPhaseLabels: Record<MarketplaceInstallState['phase'], string> = {
+  queued: '等待安装',
+  downloading: '正在下载',
+  verifying: '正在校验',
+  extracting: '正在解压',
+  committing: '正在提交',
+  completed: '安装完成',
+  failed: '安装失败',
+  cancelled: '已取消',
+}
+
+export function marketplaceInstallPhaseLabel(phase: MarketplaceInstallState['phase']): string {
+  return marketplaceInstallPhaseLabels[phase]
+}
+
+export function findMarketplaceInstallTask(
+  tasks: Map<string, MarketplaceInstallState>,
+  workspaceSlug: string,
+  marketplaceSkillId: string,
+  version: string,
+): MarketplaceInstallState | undefined {
+  let current: MarketplaceInstallState | undefined
+  for (const task of tasks.values()) {
+    if (
+      task.workspaceSlug === workspaceSlug
+      && task.marketplaceSkillId === marketplaceSkillId
+      && task.version === version
+    ) {
+      current = task
+    }
+  }
+  return current
+}
+
 export function toMarketplaceListQuery(state: MarketplaceState): MarketplaceListQuery {
   const query = state.query.trim()
   return {

@@ -3,7 +3,12 @@ import { useAtom, useAtomValue } from 'jotai'
 import { ArrowLeft, File, Folder, ShieldCheck, Star } from 'lucide-react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import type { MarketplaceFileNode, MarketplaceSkillImportSource } from '@proma/shared'
-import { marketplaceInstallTasksAtom, marketplaceStateAtom } from '@/atoms/marketplace-atoms'
+import {
+  findMarketplaceInstallTask,
+  marketplaceInstallPhaseLabel,
+  marketplaceInstallTasksAtom,
+  marketplaceStateAtom,
+} from '@/atoms/marketplace-atoms'
 import { agentWorkspacesAtom, currentAgentWorkspaceIdAtom, workspaceCapabilitiesVersionAtom } from '@/atoms/agent-atoms'
 import {
   createMarketplaceMemoryEntries,
@@ -12,6 +17,16 @@ import {
   type MarketplaceDetailTab,
 } from '@/atoms/marketplace-route'
 import { cn } from '@/lib/utils'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { MarketplaceMarkdown } from './MarketplaceMarkdown'
 import { MarketplaceVersionHistory } from './MarketplaceVersionHistory'
 
@@ -77,6 +92,8 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
   const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   const capabilitiesVersion = useAtomValue(workspaceCapabilitiesVersionAtom)
   const [installError, setInstallError] = React.useState<string | null>(null)
+  const [dismissedConflictId, setDismissedConflictId] = React.useState<string | null>(null)
+  const [confirmingConflict, setConfirmingConflict] = React.useState(false)
   const [installedSource, setInstalledSource] = React.useState<MarketplaceSkillImportSource | null>(null)
   const route = React.useMemo(() => readMarketplaceDetailRoute(searchParams), [searchParams])
   const detail = state.selectedIdentifier === identifier ? state.selectedSkill : null
@@ -91,13 +108,16 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
   })[0]
   const currentWorkspace = workspaces.find((workspace) => workspace.id === currentWorkspaceId)
   const installTask = detail && currentWorkspace
-    ? [...installTasks.values()].find((task) => (
-        task.workspaceSlug === currentWorkspace.slug
-        && task.marketplaceSkillId === detail.id
-        && task.version === detail.latestVersion
-      ))
+    ? findMarketplaceInstallTask(installTasks, currentWorkspace.slug, detail.id, detail.latestVersion)
     : undefined
   const installedCurrentVersion = installedSource?.installedVersion === detail?.latestVersion
+  const installActive = installTask && !['completed', 'failed', 'cancelled'].includes(installTask.phase)
+  const replaceableConflict = installTask?.phase === 'failed' && installTask.conflict?.replaceable
+    ? installTask.conflict
+    : undefined
+  const conflictDialogOpen = Boolean(
+    replaceableConflict && installTask && dismissedConflictId !== installTask.installId,
+  )
 
   React.useEffect(() => {
     let cancelled = false
@@ -121,12 +141,38 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
   const installSkill = React.useCallback(() => {
     if (!detail || !currentWorkspace) return
     setInstallError(null)
+    setDismissedConflictId(null)
     window.electronAPI.installMarketplaceSkill({
       workspaceSlug: currentWorkspace.slug,
       marketplaceSkillId: detail.id,
       version: detail.latestVersion,
     }).catch((error: unknown) => setInstallError(errorMessage(error)))
   }, [currentWorkspace, detail])
+
+  const handleInstallAction = React.useCallback(() => {
+    if (replaceableConflict) {
+      setDismissedConflictId(null)
+      return
+    }
+    installSkill()
+  }, [installSkill, replaceableConflict])
+
+  const cancelInstall = React.useCallback(() => {
+    if (!installTask || installTask.phase === 'committing') return
+    setInstallError(null)
+    window.electronAPI.cancelMarketplaceInstall(installTask.installId)
+      .catch((error: unknown) => setInstallError(errorMessage(error)))
+  }, [installTask])
+
+  const confirmConflict = React.useCallback(() => {
+    if (!installTask || !replaceableConflict) return
+    setConfirmingConflict(true)
+    setInstallError(null)
+    setDismissedConflictId(installTask.installId)
+    window.electronAPI.confirmMarketplaceInstallConflict(installTask.installId)
+      .catch((error: unknown) => setInstallError(errorMessage(error)))
+      .finally(() => setConfirmingConflict(false))
+  }, [installTask, replaceableConflict])
 
   React.useEffect(() => {
     let cancelled = false
@@ -227,21 +273,47 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
                 </div>
                 <button
                   type="button"
-                  disabled={!currentWorkspace || installedCurrentVersion || (installTask && !['failed', 'cancelled'].includes(installTask.phase))}
-                  onClick={installSkill}
+                  disabled={!currentWorkspace || installedCurrentVersion || Boolean(installActive)}
+                  onClick={handleInstallAction}
                   className="rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
                 >
                   {!currentWorkspace
                     ? '请先选择工作区'
                     : installedCurrentVersion || installTask?.phase === 'completed'
                       ? '已安装'
-                      : installTask && !['failed', 'cancelled'].includes(installTask.phase)
-                        ? '安装中…'
-                        : installTask?.phase === 'failed'
-                          ? '重试安装'
-                          : '安装到当前工作区'}
+                      : installActive
+                        ? `${marketplaceInstallPhaseLabel(installTask.phase)}…`
+                        : replaceableConflict
+                          ? '处理同名冲突'
+                          : installTask?.phase === 'failed'
+                            ? '重试安装'
+                            : '安装到当前工作区'}
                 </button>
               </div>
+              {installTask && installTask.phase !== 'completed' && (
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/55 px-4 py-3 text-sm">
+                  <div>
+                    <span className="font-medium">{marketplaceInstallPhaseLabel(installTask.phase)}</span>
+                    {installTask.phase === 'failed' && installTask.failedAt && (
+                      <span className="ml-2 text-muted-foreground">
+                        失败阶段：{marketplaceInstallPhaseLabel(installTask.failedAt)}
+                      </span>
+                    )}
+                    {installTask.phase === 'committing' && (
+                      <span className="ml-2 text-muted-foreground">正在原子写入工作区，此阶段不能安全取消。</span>
+                    )}
+                  </div>
+                  {installActive && installTask.phase !== 'committing' && (
+                    <button
+                      type="button"
+                      onClick={cancelInstall}
+                      className="rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-background hover:text-foreground"
+                    >
+                      取消安装
+                    </button>
+                  )}
+                </div>
+              )}
               {(installError || installTask?.error) && (
                 <div className="mt-4 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
                   {installError ?? installTask?.error}
@@ -327,6 +399,32 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
           </>
         ) : null}
       </div>
+      <AlertDialog
+        open={conflictDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && installTask) setDismissedConflictId(installTask.installId)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>替换同名工作区 Skill？</AlertDialogTitle>
+            <AlertDialogDescription>
+              当前工作区“{currentWorkspace?.name ?? currentWorkspace?.slug}”中已有同名非市场 Skill
+              “{replaceableConflict?.identifier}”。确认后将只替换这个工作区中的目标，原内容会在新版本提交成功后删除。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={confirmingConflict}>保留原 Skill</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={confirmingConflict}
+              onClick={confirmConflict}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {confirmingConflict ? '正在确认…' : '确认替换并安装'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
