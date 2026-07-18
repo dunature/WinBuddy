@@ -134,6 +134,9 @@ import type {
   MarketplaceSkillSummary,
   MarketplaceSkillDetail,
   MarketplaceSkillFile,
+  MarketplaceInstallRequest,
+  MarketplaceInstallState,
+  MarketplaceInstallStatus,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
@@ -182,6 +185,7 @@ import { optimizePrompt, cancelPromptOptimization } from './lib/prompt-optimizat
 import { setBuiltinMcpUserEnabled } from './lib/builtin-mcp/settings'
 import { setDockBadgeCount } from './lib/dock-badge-service'
 import { createMarketplaceCatalogClient } from './lib/marketplace-catalog-client'
+import { MarketplaceInstaller } from './lib/marketplace-installer'
 
 import { checkEnvironment } from './lib/environment-checker'
 import { fetchInstallerManifest, findInstallerSource } from './lib/installer-manifest'
@@ -218,7 +222,7 @@ import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveF
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
-import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getWorkspaceSkillsDir, getWorkspaceFilesDir, getScratchPadPath } from './lib/config-paths'
+import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getWorkspaceSkillsDir, getInactiveSkillsDir, getWorkspaceFilesDir, getScratchPadPath } from './lib/config-paths'
 import { getCachedDefaultAppInfo, saveCachedDefaultAppInfo } from './lib/default-app-cache'
 import { calculateStorageStats, cleanupStorage, cleanupTempFiles } from './lib/storage-service'
 import type { CleanupOptions } from './lib/storage-service'
@@ -860,6 +864,23 @@ export function registerIpcHandlers(): void {
   const marketplaceCatalogClient = createMarketplaceCatalogClient({
     runtime: app.isPackaged ? 'production' : 'development',
   })
+  const marketplaceInstaller = new MarketplaceInstaller({
+    catalogClient: marketplaceCatalogClient,
+    resolveWorkspaceDirectories: (workspaceSlug) => {
+      if (!listAgentWorkspaces().some((workspace) => workspace.slug === workspaceSlug)) {
+        throw new Error(`Agent 工作区不存在: ${workspaceSlug}`)
+      }
+      return {
+        skillsDirectory: getWorkspaceSkillsDir(workspaceSlug),
+        inactiveSkillsDirectory: getInactiveSkillsDir(workspaceSlug),
+      }
+    },
+    onProgress: (state) => {
+      BrowserWindow.getAllWindows().forEach((window) => {
+        if (!window.isDestroyed()) window.webContents.send(MARKETPLACE_IPC_CHANNELS.INSTALL_PROGRESS, state)
+      })
+    },
+  })
 
   // ===== 技能市场（只读） =====
 
@@ -884,6 +905,40 @@ export function registerIpcHandlers(): void {
     MARKETPLACE_IPC_CHANNELS.GET_SKILL_FILE,
     async (_, identifier: string, version: string, path: string): Promise<MarketplaceSkillFile> =>
       marketplaceCatalogClient.getSkillFile(identifier, version, path)
+  )
+
+  ipcMain.handle(
+    MARKETPLACE_IPC_CHANNELS.LIST_INSTALLS,
+    async (): Promise<MarketplaceInstallState[]> => marketplaceInstaller.listInstalls()
+  )
+
+  ipcMain.handle(
+    MARKETPLACE_IPC_CHANNELS.GET_INSTALL,
+    async (_, installId: string): Promise<MarketplaceInstallState | undefined> =>
+      marketplaceInstaller.getInstall(installId)
+  )
+
+  ipcMain.handle(
+    MARKETPLACE_IPC_CHANNELS.GET_INSTALL_STATUS,
+    async (_, installId: string): Promise<MarketplaceInstallStatus | undefined> =>
+      marketplaceInstaller.getStatus(installId)
+  )
+
+  ipcMain.handle(
+    MARKETPLACE_IPC_CHANNELS.INSTALL,
+    async (_, request: MarketplaceInstallRequest): Promise<MarketplaceInstallState> =>
+      marketplaceInstaller.install(request)
+  )
+
+  ipcMain.handle(
+    MARKETPLACE_IPC_CHANNELS.UPDATE,
+    async (_, request: MarketplaceInstallRequest): Promise<MarketplaceInstallState> =>
+      marketplaceInstaller.update(request)
+  )
+
+  ipcMain.handle(
+    MARKETPLACE_IPC_CHANNELS.CANCEL,
+    async (_, installId: string): Promise<boolean> => marketplaceInstaller.cancel(installId)
   )
 
   // ===== 运行时相关 =====

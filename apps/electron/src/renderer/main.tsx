@@ -44,6 +44,7 @@ import {
 } from './atoms/agent-atoms'
 import { updateStatusAtom, initializeUpdater } from './atoms/updater'
 import { automationsAtom } from './atoms/automation-atoms'
+import { marketplaceInstallTasksAtom, withMarketplaceInstallState } from './atoms/marketplace-atoms'
 import {
   notificationsEnabledAtom,
   notificationSoundEnabledAtom,
@@ -479,6 +480,34 @@ function ChatListenersInitializer(): null {
  */
 function AgentListenersInitializer(): null {
   useGlobalAgentListeners()
+  return null
+}
+
+function MarketplaceInstallInitializer(): null {
+  const store = useStore()
+
+  useEffect(() => {
+    let mounted = true
+    window.electronAPI.listMarketplaceInstalls()
+      .then((states) => {
+        if (!mounted) return
+        store.set(marketplaceInstallTasksAtom, new Map(states.map((state) => [state.installId, state])))
+      })
+      .catch((error: unknown) => console.error('[技能市场] 加载安装任务失败:', error))
+
+    const unsubscribe = window.electronAPI.onMarketplaceInstallProgress((state) => {
+      const previous = store.get(marketplaceInstallTasksAtom).get(state.installId)
+      store.set(marketplaceInstallTasksAtom, (tasks) => withMarketplaceInstallState(tasks, state))
+      if (state.phase === 'completed' && previous?.phase !== 'completed') {
+        store.set(workspaceCapabilitiesVersionAtom, (version) => version + 1)
+      }
+    })
+    return () => {
+      mounted = false
+      unsubscribe()
+    }
+  }, [store])
+
   return null
 }
 
@@ -935,6 +964,7 @@ if (isQuickTaskWindow) {
       <MarkdownFontSizeInitializer />
       <ChatListenersInitializer />
       <AgentListenersInitializer />
+      <MarketplaceInstallInitializer />
       <ChatToolInitializer />
       <UsageBudgetNotifier />
       <UpdaterInitializer />

@@ -94,6 +94,15 @@ describe('MarketplaceCatalogClient', () => {
         if (url.pathname.endsWith('/file')) {
           return Response.json({ data: { path: 'SKILL.md', size: 10, content: '# Skill', isText: true }, requestId: 'req-4' })
         }
+        if (url.pathname.endsWith('/manifest')) {
+          return Response.json({
+            data: {
+              marketplaceSkillId: 'skill-1', identifier: 'deep-research', version: '1.0.0',
+              sha256: 'a'.repeat(64), size: 100, fileCount: 1, files: [], downloadUrl: 'https://download.test/package.zip',
+            },
+            requestId: 'req-5',
+          })
+        }
         return Response.json({
           data: {
             id: 'skill-1', identifier: 'deep-research', name: '深度研究助手', tagline: '研究', description: '说明',
@@ -117,9 +126,11 @@ describe('MarketplaceCatalogClient', () => {
         .toMatchObject({ page: { number: 2, size: 16 }, items: [{ identifier: 'deep-research' }] })
       expect((await client.getSkill('deep-research')).description).toBe('说明')
       expect((await client.getSkillFile('deep-research', '1.0.0', 'SKILL.md')).content).toBe('# Skill')
+      expect((await client.getInstallManifest('skill-1', '1.0.0')).identifier).toBe('deep-research')
       expect(requestedUrls[1]).toContain('q=%E7%A0%94%E7%A9%B6')
       expect(requestedUrls[1]).toContain('featured=1')
       expect(requestedUrls[3]).toContain('path=SKILL.md')
+      expect(requestedUrls[4]).toContain('/marketplace/skills/by-id/skill-1/versions/1.0.0/manifest')
     } finally {
       server.stop(true)
     }

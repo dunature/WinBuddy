@@ -150,12 +150,19 @@ import { QUICK_TASK_IPC_CHANNELS, TRAY_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNEL
  * 暴露给渲染进程的 API 接口定义
  */
 export interface ElectronAPI {
-  // ===== 技能市场（只读） =====
+  // ===== 技能市场 =====
 
   listMarketplaceCategories: () => Promise<import('@proma/shared').MarketplaceCategory[]>
   listMarketplaceSkills: (query: import('@proma/shared').MarketplaceListQuery) => Promise<import('@proma/shared').MarketplacePage<import('@proma/shared').MarketplaceSkillSummary>>
   getMarketplaceSkill: (identifier: string) => Promise<import('@proma/shared').MarketplaceSkillDetail>
   getMarketplaceSkillFile: (identifier: string, version: string, path: string) => Promise<import('@proma/shared').MarketplaceSkillFile>
+  listMarketplaceInstalls: () => Promise<import('@proma/shared').MarketplaceInstallState[]>
+  getMarketplaceInstall: (installId: string) => Promise<import('@proma/shared').MarketplaceInstallState | undefined>
+  getMarketplaceInstallStatus: (installId: string) => Promise<import('@proma/shared').MarketplaceInstallStatus | undefined>
+  installMarketplaceSkill: (request: import('@proma/shared').MarketplaceInstallRequest) => Promise<import('@proma/shared').MarketplaceInstallState>
+  updateMarketplaceSkill: (request: import('@proma/shared').MarketplaceInstallRequest) => Promise<import('@proma/shared').MarketplaceInstallState>
+  cancelMarketplaceInstall: (installId: string) => Promise<boolean>
+  onMarketplaceInstallProgress: (callback: (state: import('@proma/shared').MarketplaceInstallState) => void) => () => void
 
   // ===== 运行时相关 =====
 
@@ -1118,7 +1125,7 @@ interface MigrationExportResult {
  * 实现 ElectronAPI 接口
  */
 const electronAPI: ElectronAPI = {
-  // 技能市场（只读）
+  // 技能市场
   listMarketplaceCategories: () =>
     ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.LIST_CATEGORIES),
   listMarketplaceSkills: (query) =>
@@ -1127,6 +1134,23 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.GET_SKILL, identifier),
   getMarketplaceSkillFile: (identifier, version, path) =>
     ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.GET_SKILL_FILE, identifier, version, path),
+  listMarketplaceInstalls: () =>
+    ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.LIST_INSTALLS),
+  getMarketplaceInstall: (installId) =>
+    ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.GET_INSTALL, installId),
+  getMarketplaceInstallStatus: (installId) =>
+    ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.GET_INSTALL_STATUS, installId),
+  installMarketplaceSkill: (request) =>
+    ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.INSTALL, request),
+  updateMarketplaceSkill: (request) =>
+    ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.UPDATE, request),
+  cancelMarketplaceInstall: (installId) =>
+    ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.CANCEL, installId),
+  onMarketplaceInstallProgress: (callback) => {
+    const listener = (_: unknown, state: import('@proma/shared').MarketplaceInstallState): void => callback(state)
+    ipcRenderer.on(MARKETPLACE_IPC_CHANNELS.INSTALL_PROGRESS, listener)
+    return () => { ipcRenderer.removeListener(MARKETPLACE_IPC_CHANNELS.INSTALL_PROGRESS, listener) }
+  },
 
   // 运行时
   getRuntimeStatus: () => {

@@ -2,6 +2,7 @@ import { atom } from 'jotai'
 import type {
   MarketplaceCategory,
   MarketplaceListQuery,
+  MarketplaceInstallState,
   MarketplacePageInfo,
   MarketplaceSkillDetail,
   MarketplaceSkillFile,
@@ -57,6 +58,16 @@ export const initialMarketplaceState: MarketplaceState = {
 }
 
 export const marketplaceStateAtom = atom<MarketplaceState>(initialMarketplaceState)
+export const marketplaceInstallTasksAtom = atom<Map<string, MarketplaceInstallState>>(new Map())
+
+export function withMarketplaceInstallState(
+  tasks: Map<string, MarketplaceInstallState>,
+  state: MarketplaceInstallState,
+): Map<string, MarketplaceInstallState> {
+  const next = new Map(tasks)
+  next.set(state.installId, state)
+  return next
+}
 
 export function toMarketplaceListQuery(state: MarketplaceState): MarketplaceListQuery {
   const query = state.query.trim()

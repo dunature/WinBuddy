@@ -1,9 +1,10 @@
 import * as React from 'react'
-import { useAtom } from 'jotai'
+import { useAtom, useAtomValue } from 'jotai'
 import { ArrowLeft, File, Folder, ShieldCheck, Star } from 'lucide-react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
-import type { MarketplaceFileNode } from '@proma/shared'
-import { marketplaceStateAtom } from '@/atoms/marketplace-atoms'
+import type { MarketplaceFileNode, MarketplaceSkillImportSource } from '@proma/shared'
+import { marketplaceInstallTasksAtom, marketplaceStateAtom } from '@/atoms/marketplace-atoms'
+import { agentWorkspacesAtom, currentAgentWorkspaceIdAtom, workspaceCapabilitiesVersionAtom } from '@/atoms/agent-atoms'
 import {
   createMarketplaceMemoryEntries,
   readMarketplaceDetailRoute,
@@ -71,6 +72,12 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [state, setState] = useAtom(marketplaceStateAtom)
+  const installTasks = useAtomValue(marketplaceInstallTasksAtom)
+  const workspaces = useAtomValue(agentWorkspacesAtom)
+  const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
+  const capabilitiesVersion = useAtomValue(workspaceCapabilitiesVersionAtom)
+  const [installError, setInstallError] = React.useState<string | null>(null)
+  const [installedSource, setInstalledSource] = React.useState<MarketplaceSkillImportSource | null>(null)
   const route = React.useMemo(() => readMarketplaceDetailRoute(searchParams), [searchParams])
   const detail = state.selectedIdentifier === identifier ? state.selectedSkill : null
   const latest = detail?.versions.find((version) => version.version === detail.latestVersion)
@@ -82,6 +89,44 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
     sort: state.sort,
     page: state.page,
   })[0]
+  const currentWorkspace = workspaces.find((workspace) => workspace.id === currentWorkspaceId)
+  const installTask = detail && currentWorkspace
+    ? [...installTasks.values()].find((task) => (
+        task.workspaceSlug === currentWorkspace.slug
+        && task.marketplaceSkillId === detail.id
+        && task.version === detail.latestVersion
+      ))
+    : undefined
+  const installedCurrentVersion = installedSource?.installedVersion === detail?.latestVersion
+
+  React.useEffect(() => {
+    let cancelled = false
+    if (!detail || !currentWorkspace) {
+      setInstalledSource(null)
+      return
+    }
+    window.electronAPI.getWorkspaceSkills(currentWorkspace.slug)
+      .then((skills) => {
+        if (cancelled) return
+        const source = skills.find((skill) => (
+          skill.importSource?.kind === 'marketplace'
+          && skill.importSource.marketplaceSkillId === detail.id
+        ))?.importSource
+        setInstalledSource(source?.kind === 'marketplace' ? source : null)
+      })
+      .catch((error: unknown) => console.error('[技能市场] 读取工作区安装状态失败:', error))
+    return () => { cancelled = true }
+  }, [capabilitiesVersion, currentWorkspace, detail])
+
+  const installSkill = React.useCallback(() => {
+    if (!detail || !currentWorkspace) return
+    setInstallError(null)
+    window.electronAPI.installMarketplaceSkill({
+      workspaceSlug: currentWorkspace.slug,
+      marketplaceSkillId: detail.id,
+      version: detail.latestVersion,
+    }).catch((error: unknown) => setInstallError(errorMessage(error)))
+  }, [currentWorkspace, detail])
 
   React.useEffect(() => {
     let cancelled = false
@@ -180,10 +225,28 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
                     <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><ShieldCheck size={13} /> 已发布</span>
                   </div>
                 </div>
-                <button type="button" disabled className="rounded-xl bg-muted px-5 py-2.5 text-sm font-medium text-muted-foreground opacity-70">
-                  安装即将开放
+                <button
+                  type="button"
+                  disabled={!currentWorkspace || installedCurrentVersion || (installTask && !['failed', 'cancelled'].includes(installTask.phase))}
+                  onClick={installSkill}
+                  className="rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
+                >
+                  {!currentWorkspace
+                    ? '请先选择工作区'
+                    : installedCurrentVersion || installTask?.phase === 'completed'
+                      ? '已安装'
+                      : installTask && !['failed', 'cancelled'].includes(installTask.phase)
+                        ? '安装中…'
+                        : installTask?.phase === 'failed'
+                          ? '重试安装'
+                          : '安装到当前工作区'}
                 </button>
               </div>
+              {(installError || installTask?.error) && (
+                <div className="mt-4 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                  {installError ?? installTask?.error}
+                </div>
+              )}
             </section>
 
             <div className="mt-6 flex gap-1 overflow-x-auto rounded-xl bg-muted/45 p-1">
