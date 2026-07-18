@@ -76,7 +76,7 @@ export function SkillCard({ skill, isBuiltin, updating, onOpen, onToggle, onUpda
           </span>
         ) : skill.importSource?.kind === 'marketplace' ? (
           <span className="truncate rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-            技能市场
+            技能市场 · v{skill.importSource.installedVersion}
           </span>
         ) : (
           <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">

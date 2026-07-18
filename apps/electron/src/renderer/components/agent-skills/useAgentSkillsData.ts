@@ -14,6 +14,7 @@ import {
   currentAgentWorkspaceIdAtom,
   workspaceCapabilitiesVersionAtom,
 } from '@/atoms/agent-atoms'
+import { notifyMarketplaceWorkspaceChangedAtom } from '@/atoms/marketplace-atoms'
 import type { BuiltinMcpServerSummary, SkillMeta, WorkspaceCapabilities, WorkspaceMcpConfig } from '@proma/shared'
 
 export interface AgentSkillsData {
@@ -22,6 +23,7 @@ export interface AgentSkillsData {
   workspaceName: string
   hasWorkspace: boolean
   loading: boolean
+  loadError: string | null
   skills: SkillMeta[]
   defaultSkillSlugs: Set<string>
   skillsDir: string
@@ -35,18 +37,21 @@ export interface AgentSkillsData {
   toggleMcp: (name: string, enabled: boolean) => Promise<void>
   toggleBuiltinMcp: (id: string, enabled: boolean) => Promise<void>
   deleteMcp: (name: string) => Promise<void>
+  reload: () => Promise<void>
 }
 
 export function useAgentSkillsData(): AgentSkillsData {
   const workspaces = useAtomValue(agentWorkspacesAtom)
   const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   const bumpCapabilitiesVersion = useSetAtom(workspaceCapabilitiesVersionAtom)
+  const notifyMarketplaceWorkspaceChanged = useSetAtom(notifyMarketplaceWorkspaceChangedAtom)
   const capabilitiesVersion = useAtomValue(workspaceCapabilitiesVersionAtom)
 
   const currentWorkspace = workspaces.find((w) => w.id === currentWorkspaceId)
   const workspaceSlug = currentWorkspace?.slug ?? ''
 
   const [loading, setLoading] = React.useState(true)
+  const [loadError, setLoadError] = React.useState<string | null>(null)
   const [skills, setSkills] = React.useState<SkillMeta[]>([])
   const [defaultSkillSlugs, setDefaultSkillSlugs] = React.useState<Set<string>>(new Set())
   const [skillsDir, setSkillsDir] = React.useState('')
@@ -56,30 +61,56 @@ export function useAgentSkillsData(): AgentSkillsData {
   const [updatingSkill, setUpdatingSkill] = React.useState<string | null>(null)
 
   const loadData = React.useCallback(async () => {
+    setLoading(true)
     if (!workspaceSlug) {
       setSkills([])
       setMcpConfig({ servers: {} })
       setCapabilities(null)
       setBuiltinMcpServers([])
       setLoading(false)
+      setLoadError(null)
       return
     }
+    setLoadError(null)
     try {
-      const [config, skillList, dir, defaultSlugs, capabilities] = await Promise.all([
+      const [config, skillList, installedMarketplaceSkills, dir, defaultSlugs, capabilities] = await Promise.all([
         window.electronAPI.getWorkspaceMcpConfig(workspaceSlug),
         window.electronAPI.getWorkspaceSkills(workspaceSlug),
+        window.electronAPI.listInstalledMarketplaceSkills(workspaceSlug),
         window.electronAPI.getWorkspaceSkillsDir(workspaceSlug),
         window.electronAPI.getDefaultSkillSlugs(),
         window.electronAPI.getWorkspaceCapabilities(workspaceSlug),
       ])
       setMcpConfig(config)
-      setSkills(skillList)
+      setSkills(skillList.map((skill) => {
+        const source = skill.importSource
+        if (source?.kind !== 'marketplace') return skill
+        const installed = installedMarketplaceSkills.find((candidate) => (
+          candidate.marketplaceSkillId === source.marketplaceSkillId
+          && candidate.identifier === skill.slug
+          && candidate.enabled === skill.enabled
+        ))
+        if (!installed) return skill
+        return {
+          ...skill,
+          enabled: installed.enabled,
+          importSource: {
+            kind: 'marketplace' as const,
+            marketplaceSkillId: installed.marketplaceSkillId,
+            identifier: installed.identifier,
+            installedVersion: installed.installedVersion,
+            contentHash: installed.contentHash,
+            installedAt: installed.installedAt,
+          },
+        }
+      }))
       setSkillsDir(dir)
       setDefaultSkillSlugs(new Set(defaultSlugs))
       setCapabilities(capabilities)
       setBuiltinMcpServers(capabilities.builtinMcpServers)
     } catch (error) {
       console.error('[Agent 技能] 加载工作区配置失败:', error)
+      setLoadError(error instanceof Error ? error.message : '加载工作区 Skills 失败')
     } finally {
       setLoading(false)
     }
@@ -87,26 +118,44 @@ export function useAgentSkillsData(): AgentSkillsData {
 
   // workspaceSlug 或外部能力版本变化时重新拉取
   React.useEffect(() => {
-    setLoading(true)
     void loadData()
   }, [loadData, capabilitiesVersion])
 
   const toggleSkill = React.useCallback(async (slug: string, enabled: boolean) => {
     try {
-      await window.electronAPI.toggleWorkspaceSkill(workspaceSlug, slug, enabled)
+      const skill = skills.find((candidate) => candidate.slug === slug)
+      if (skill?.importSource?.kind === 'marketplace') {
+        await window.electronAPI.setInstalledMarketplaceSkillEnabled({
+          workspaceSlug,
+          marketplaceSkillId: skill.importSource.marketplaceSkillId,
+          enabled,
+        })
+        notifyMarketplaceWorkspaceChanged()
+      } else {
+        await window.electronAPI.toggleWorkspaceSkill(workspaceSlug, slug, enabled)
+        bumpCapabilitiesVersion((v) => v + 1)
+      }
       setSkills((prev) => prev.map((s) => (s.slug === slug ? { ...s, enabled } : s)))
-      bumpCapabilitiesVersion((v) => v + 1)
     } catch (error) {
       console.error('[Agent 技能] 切换 Skill 状态失败:', error)
       toast.error('切换 Skill 状态失败')
     }
-  }, [workspaceSlug, bumpCapabilitiesVersion])
+  }, [workspaceSlug, skills, bumpCapabilitiesVersion, notifyMarketplaceWorkspaceChanged])
 
   const deleteSkill = React.useCallback(async (slug: string, name: string): Promise<boolean> => {
     try {
-      await window.electronAPI.deleteWorkspaceSkill(workspaceSlug, slug)
+      const skill = skills.find((candidate) => candidate.slug === slug)
+      if (skill?.importSource?.kind === 'marketplace') {
+        await window.electronAPI.uninstallMarketplaceSkill({
+          workspaceSlug,
+          marketplaceSkillId: skill.importSource.marketplaceSkillId,
+        })
+        notifyMarketplaceWorkspaceChanged()
+      } else {
+        await window.electronAPI.deleteWorkspaceSkill(workspaceSlug, slug)
+        bumpCapabilitiesVersion((v) => v + 1)
+      }
       setSkills((prev) => prev.filter((s) => s.slug !== slug))
-      bumpCapabilitiesVersion((v) => v + 1)
       toast.success(`已删除 Skill：${name}`)
       return true
     } catch (error) {
@@ -114,7 +163,7 @@ export function useAgentSkillsData(): AgentSkillsData {
       toast.error('删除 Skill 失败')
       return false
     }
-  }, [workspaceSlug, bumpCapabilitiesVersion])
+  }, [workspaceSlug, skills, bumpCapabilitiesVersion, notifyMarketplaceWorkspaceChanged])
 
   const updateSkill = React.useCallback(async (slug: string) => {
     if (!workspaceSlug || updatingSkill) return
@@ -184,6 +233,7 @@ export function useAgentSkillsData(): AgentSkillsData {
     workspaceName: currentWorkspace?.name ?? '',
     hasWorkspace: !!currentWorkspace,
     loading,
+    loadError,
     skills,
     defaultSkillSlugs,
     skillsDir,
@@ -197,5 +247,6 @@ export function useAgentSkillsData(): AgentSkillsData {
     toggleMcp,
     toggleBuiltinMcp,
     deleteMcp,
+    reload: loadData,
   }
 }

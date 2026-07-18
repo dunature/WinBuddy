@@ -1,15 +1,22 @@
 import * as React from 'react'
-import { useAtom, useAtomValue } from 'jotai'
-import { ArrowLeft, File, Folder, ShieldCheck, Star } from 'lucide-react'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
+import { ArrowLeft, Bot, File, Folder, Power, ShieldCheck, Star, Trash2 } from 'lucide-react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
-import type { MarketplaceFileNode, MarketplaceSkillImportSource } from '@proma/shared'
+import type { MarketplaceFileNode, MarketplaceInstalledSkill } from '@proma/shared'
 import {
   findMarketplaceInstallTask,
   marketplaceInstallPhaseLabel,
   marketplaceInstallTasksAtom,
   marketplaceStateAtom,
+  notifyMarketplaceWorkspaceChangedAtom,
 } from '@/atoms/marketplace-atoms'
-import { agentWorkspacesAtom, currentAgentWorkspaceIdAtom, workspaceCapabilitiesVersionAtom } from '@/atoms/agent-atoms'
+import {
+  agentSessionsAtom,
+  agentWorkspacesAtom,
+  currentAgentSessionIdAtom,
+  currentAgentWorkspaceIdAtom,
+  workspaceCapabilitiesVersionAtom,
+} from '@/atoms/agent-atoms'
 import {
   createMarketplaceMemoryEntries,
   readMarketplaceDetailRoute,
@@ -29,9 +36,19 @@ import {
 } from '@/components/ui/alert-dialog'
 import { MarketplaceMarkdown } from './MarketplaceMarkdown'
 import { MarketplaceVersionHistory } from './MarketplaceVersionHistory'
+import { prefillMarketplaceSkillDraftAtom, selectMarketplaceAgentSession } from './marketplace-agent-use'
+import { useCreateSession } from '@/hooks/useCreateSession'
+import { useOpenSession } from '@/hooks/useOpenSession'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '技能详情暂时无法访问'
+}
+
+export function canToggleInstalledMarketplaceSkill(
+  installedSkill: MarketplaceInstalledSkill | null,
+  lifecycleAction: string | null,
+): installedSkill is MarketplaceInstalledSkill {
+  return installedSkill !== null && lifecycleAction === null
 }
 
 function formatBytes(size: number): string {
@@ -89,12 +106,21 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
   const [state, setState] = useAtom(marketplaceStateAtom)
   const installTasks = useAtomValue(marketplaceInstallTasksAtom)
   const workspaces = useAtomValue(agentWorkspacesAtom)
+  const agentSessions = useAtomValue(agentSessionsAtom)
+  const currentAgentSessionId = useAtomValue(currentAgentSessionIdAtom)
   const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   const capabilitiesVersion = useAtomValue(workspaceCapabilitiesVersionAtom)
+  const notifyWorkspaceChanged = useSetAtom(notifyMarketplaceWorkspaceChangedAtom)
+  const prefillSkillDraft = useSetAtom(prefillMarketplaceSkillDraftAtom)
+  const { createAgent } = useCreateSession()
+  const openSession = useOpenSession()
   const [installError, setInstallError] = React.useState<string | null>(null)
+  const [lifecycleError, setLifecycleError] = React.useState<string | null>(null)
+  const [lifecycleAction, setLifecycleAction] = React.useState<'toggle' | 'uninstall' | 'agent' | null>(null)
   const [dismissedConflictId, setDismissedConflictId] = React.useState<string | null>(null)
   const [confirmingConflict, setConfirmingConflict] = React.useState(false)
-  const [installedSource, setInstalledSource] = React.useState<MarketplaceSkillImportSource | null>(null)
+  const [uninstallDialogOpen, setUninstallDialogOpen] = React.useState(false)
+  const [installedSkill, setInstalledSkill] = React.useState<MarketplaceInstalledSkill | null>(null)
   const route = React.useMemo(() => readMarketplaceDetailRoute(searchParams), [searchParams])
   const detail = state.selectedIdentifier === identifier ? state.selectedSkill : null
   const latest = detail?.versions.find((version) => version.version === detail.latestVersion)
@@ -110,7 +136,7 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
   const installTask = detail && currentWorkspace
     ? findMarketplaceInstallTask(installTasks, currentWorkspace.slug, detail.id, detail.latestVersion)
     : undefined
-  const installedCurrentVersion = installedSource?.installedVersion === detail?.latestVersion
+  const installedCurrentVersion = installedSkill?.installedVersion === detail?.latestVersion
   const installActive = installTask && !['completed', 'failed', 'cancelled'].includes(installTask.phase)
   const replaceableConflict = installTask?.phase === 'failed' && installTask.conflict?.replaceable
     ? installTask.conflict
@@ -122,21 +148,106 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
   React.useEffect(() => {
     let cancelled = false
     if (!detail || !currentWorkspace) {
-      setInstalledSource(null)
+      setInstalledSkill(null)
       return
     }
-    window.electronAPI.getWorkspaceSkills(currentWorkspace.slug)
-      .then((skills) => {
-        if (cancelled) return
-        const source = skills.find((skill) => (
-          skill.importSource?.kind === 'marketplace'
-          && skill.importSource.marketplaceSkillId === detail.id
-        ))?.importSource
-        setInstalledSource(source?.kind === 'marketplace' ? source : null)
+    setInstalledSkill(null)
+    setLifecycleError(null)
+    window.electronAPI.getInstalledMarketplaceSkill({
+      workspaceSlug: currentWorkspace.slug,
+      marketplaceSkillId: detail.id,
+    })
+      .then((installed) => {
+        if (!cancelled) setInstalledSkill(installed ?? null)
       })
-      .catch((error: unknown) => console.error('[技能市场] 读取工作区安装状态失败:', error))
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setInstalledSkill(null)
+        setLifecycleError(error instanceof Error ? error.message : '无法读取市场 Skill 安装状态')
+      })
     return () => { cancelled = true }
   }, [capabilitiesVersion, currentWorkspace, detail])
+
+  const toggleInstalledSkill = React.useCallback(async () => {
+    if (
+      !detail
+      || !currentWorkspace
+      || !canToggleInstalledMarketplaceSkill(installedSkill, lifecycleAction)
+    ) return
+    setLifecycleAction('toggle')
+    setLifecycleError(null)
+    try {
+      const installed = await window.electronAPI.setInstalledMarketplaceSkillEnabled({
+        workspaceSlug: currentWorkspace.slug,
+        marketplaceSkillId: detail.id,
+        enabled: !installedSkill.enabled,
+      })
+      setInstalledSkill(installed)
+      notifyWorkspaceChanged()
+    } catch (error) {
+      setLifecycleError(error instanceof Error ? error.message : '切换市场 Skill 状态失败')
+    } finally {
+      setLifecycleAction(null)
+    }
+  }, [currentWorkspace, detail, installedSkill, lifecycleAction, notifyWorkspaceChanged])
+
+  const uninstallInstalledSkill = React.useCallback(async () => {
+    if (!detail || !currentWorkspace || !installedSkill || lifecycleAction) return
+    setLifecycleAction('uninstall')
+    setLifecycleError(null)
+    try {
+      await window.electronAPI.uninstallMarketplaceSkill({
+        workspaceSlug: currentWorkspace.slug,
+        marketplaceSkillId: detail.id,
+      })
+      setInstalledSkill(null)
+      setUninstallDialogOpen(false)
+      notifyWorkspaceChanged()
+    } catch (error) {
+      setLifecycleError(error instanceof Error ? error.message : '卸载市场 Skill 失败')
+    } finally {
+      setLifecycleAction(null)
+    }
+  }, [currentWorkspace, detail, installedSkill, lifecycleAction, notifyWorkspaceChanged])
+
+  const useSkillInAgent = React.useCallback(async () => {
+    if (!detail || !currentWorkspace || !installedSkill || lifecycleAction) return
+    setLifecycleAction('agent')
+    setLifecycleError(null)
+    try {
+      const existing = selectMarketplaceAgentSession(
+        agentSessions,
+        currentAgentSessionId,
+        currentWorkspace.id,
+      )
+      const sessionId = existing?.id ?? await createAgent()
+      if (!sessionId) throw new Error('创建 Agent 会话失败')
+      if (existing) openSession('agent', existing.id, existing.title)
+      prefillSkillDraft({
+        sessionId,
+        identifier: detail.identifier,
+      })
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLElement>('[data-input-mode="agent"] .ProseMirror')?.focus()
+        })
+      })
+    } catch (error) {
+      setLifecycleError(error instanceof Error ? error.message : '无法在 Agent 中使用该 Skill')
+    } finally {
+      setLifecycleAction(null)
+    }
+  }, [
+    agentSessions,
+    createAgent,
+    currentAgentSessionId,
+    currentWorkspace,
+    detail,
+    installedSkill,
+    lifecycleAction,
+    openSession,
+    prefillSkillDraft,
+  ])
 
   const installSkill = React.useCallback(() => {
     if (!detail || !currentWorkspace) return
@@ -271,24 +382,41 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
                     <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><ShieldCheck size={13} /> 已发布</span>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  disabled={!currentWorkspace || installedCurrentVersion || Boolean(installActive)}
-                  onClick={handleInstallAction}
-                  className="rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
-                >
-                  {!currentWorkspace
-                    ? '请先选择工作区'
-                    : installedCurrentVersion || installTask?.phase === 'completed'
-                      ? '已安装'
-                      : installActive
-                        ? `${marketplaceInstallPhaseLabel(installTask.phase)}…`
-                        : replaceableConflict
-                          ? '处理同名冲突'
-                          : installTask?.phase === 'failed'
-                            ? '重试安装'
-                            : '安装到当前工作区'}
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  {installedSkill && (
+                    <button
+                      type="button"
+                      disabled={!installedSkill.enabled || Boolean(lifecycleAction)}
+                      onClick={() => void useSkillInAgent()}
+                      className="flex items-center gap-2 rounded-xl bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary transition hover:bg-primary/15 disabled:opacity-60"
+                    >
+                      <Bot size={16} />
+                      {lifecycleAction === 'agent'
+                        ? '正在打开…'
+                        : installedSkill.enabled ? '在 Agent 中使用' : '请先启用 Skill'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={!currentWorkspace || Boolean(installedSkill) || Boolean(installActive)}
+                    onClick={handleInstallAction}
+                    className="rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
+                  >
+                    {!currentWorkspace
+                      ? '请先选择工作区'
+                      : installedSkill || installTask?.phase === 'completed'
+                        ? installedSkill && !installedCurrentVersion
+                          ? `已安装 v${installedSkill.installedVersion}`
+                          : '已安装'
+                        : installActive
+                          ? `${marketplaceInstallPhaseLabel(installTask.phase)}…`
+                          : replaceableConflict
+                            ? '处理同名冲突'
+                            : installTask?.phase === 'failed'
+                              ? '重试安装'
+                              : '安装到当前工作区'}
+                  </button>
+                </div>
               </div>
               {installTask && installTask.phase !== 'completed' && (
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/55 px-4 py-3 text-sm">
@@ -317,6 +445,44 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
               {(installError || installTask?.error) && (
                 <div className="mt-4 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
                   {installError ?? installTask?.error}
+                </div>
+              )}
+              {installedSkill && (
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-emerald-500/10 px-4 py-3 text-sm">
+                  <div>
+                    <div className="font-medium text-emerald-700 dark:text-emerald-300">
+                      技能市场 · v{installedSkill.installedVersion}
+                    </div>
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      {installedSkill.enabled ? '已启用，可供 Agent 调用' : '已禁用，不会注入 Agent 能力'}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={Boolean(lifecycleAction)}
+                      onClick={() => void toggleInstalledSkill()}
+                      className="flex items-center gap-1.5 rounded-lg bg-background px-3 py-1.5 text-xs font-medium shadow-sm disabled:opacity-60"
+                    >
+                      <Power size={13} />
+                      {lifecycleAction === 'toggle'
+                        ? '处理中…'
+                        : installedSkill.enabled ? '禁用' : '启用'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={Boolean(lifecycleAction)}
+                      onClick={() => setUninstallDialogOpen(true)}
+                      className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-60"
+                    >
+                      <Trash2 size={13} /> 卸载
+                    </button>
+                  </div>
+                </div>
+              )}
+              {lifecycleError && (
+                <div className="mt-4 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                  {lifecycleError}
                 </div>
               )}
             </section>
@@ -421,6 +587,27 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {confirmingConflict ? '正在确认…' : '确认替换并安装'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={uninstallDialogOpen} onOpenChange={setUninstallDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>卸载市场 Skill？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将从工作区“{currentWorkspace?.name ?? currentWorkspace?.slug}”中卸载
+              “{installedSkill?.identifier}”。主进程只会删除来源与市场 ID 均验证匹配的目标目录。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={lifecycleAction === 'uninstall'}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={lifecycleAction === 'uninstall'}
+              onClick={() => void uninstallInstalledSkill()}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {lifecycleAction === 'uninstall' ? '正在卸载…' : '确认卸载'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
