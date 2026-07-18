@@ -1,6 +1,6 @@
 {
   "name": "@proma/marketplace-api",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "license": "AGPL-3.0-only",
   "description": "Bun and Hono API for the Proma marketplace",
   "type": "module",

@@ -115,6 +115,51 @@ export interface MarketplaceAdminSession {
   csrfToken: string
 }
 
+export type MarketplaceSkillStatus = 'draft' | 'published' | 'unpublished' | 'archived'
+export type MarketplaceVersionStatus =
+  | 'created'
+  | 'validation_failed'
+  | 'pending_review'
+  | 'approved'
+  | 'rejected'
+  | 'published'
+  | 'unpublished'
+  | 'archived'
+
+export interface MarketplaceAdminVersion {
+  id: string
+  skillId: string
+  version: string
+  changelog: string
+  status: MarketplaceVersionStatus
+  revision: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MarketplaceAdminSkillSummary {
+  id: string
+  identifier: string
+  name: string
+  tagline: string
+  description: string
+  authorName: string
+  authorUrl?: string
+  categoryId: string
+  tags: string[]
+  icon: string
+  featured: boolean
+  status: MarketplaceSkillStatus
+  currentPublishedVersionId: string | null
+  revision: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MarketplaceAdminSkillDetail extends MarketplaceAdminSkillSummary {
+  versions: MarketplaceAdminVersion[]
+}
+
 export const MARKETPLACE_IPC_CHANNELS = {
   LIST_CATEGORIES: 'marketplace:list-categories',
   LIST_SKILLS: 'marketplace:list-skills',

@@ -91,12 +91,16 @@ await initializeMarketplaceAdmin(database, {
 await seedCatalog(database.sql)
 
 const webRoot = new URL('../dist', import.meta.url).pathname
-const sessionDurationMs = Number(Bun.env.MARKETPLACE_E2E_SESSION_DURATION_MS ?? '5000')
+const sessionDurationMs = Number(Bun.env.MARKETPLACE_E2E_SESSION_DURATION_MS ?? '60000')
 const app = createMarketplaceApp({
   database,
   webRoot,
   allowedOrigin: 'http://localhost:4320',
   sessionDurationMs,
+})
+app.post('/__e2e__/expire-admin-sessions', async (context) => {
+  await database.sql`UPDATE admin_sessions SET invalidated_at = now() WHERE invalidated_at IS NULL`
+  return context.json({ data: { expired: true } })
 })
 const server = Bun.serve({ hostname: '127.0.0.1', port: 4320, fetch: app.fetch })
 console.log(`[技能市场 Web E2E] 已启动: ${server.url}`)

@@ -165,6 +165,91 @@
     opacity: 0.55;
   }
 
+  .admin-compact-field {
+    display: block;
+  }
+
+  .admin-compact-field > span {
+    display: block;
+    margin-bottom: 0.45rem;
+    color: var(--muted);
+    font-size: 0.65rem;
+    font-weight: 800;
+    letter-spacing: 0.07em;
+  }
+
+  .admin-compact-field input,
+  .admin-compact-field textarea,
+  .admin-compact-field select {
+    width: 100%;
+    border: 0;
+    border-radius: 0.9rem;
+    padding: 0.78rem 0.9rem;
+    color: var(--ink);
+    background: rgba(255, 255, 255, 0.72);
+    box-shadow: inset 0 0 0 1px rgba(16, 35, 61, 0.11);
+    outline: none;
+    transition: background 160ms ease, box-shadow 160ms ease;
+  }
+
+  .admin-compact-field input,
+  .admin-compact-field select {
+    min-height: 3rem;
+  }
+
+  .admin-compact-field textarea {
+    resize: vertical;
+  }
+
+  .admin-compact-field input:focus,
+  .admin-compact-field textarea:focus,
+  .admin-compact-field select:focus {
+    background: white;
+    box-shadow: inset 0 0 0 2px rgba(30, 85, 199, 0.38), 0 10px 28px rgba(16, 35, 61, 0.08);
+  }
+
+  .admin-secondary-button,
+  .admin-danger-button {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.9rem;
+    padding: 0 1rem;
+    font-size: 0.75rem;
+    font-weight: 800;
+    transition: transform 160ms ease, background 160ms ease;
+  }
+
+  .admin-secondary-button {
+    color: var(--ink);
+    background: rgba(16, 35, 61, 0.08);
+  }
+
+  .admin-danger-button {
+    color: #991b1b;
+    background: rgba(254, 202, 202, 0.58);
+  }
+
+  .admin-secondary-button:hover,
+  .admin-danger-button:hover {
+    transform: translateY(-1px);
+  }
+
+  .admin-status-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.35rem 0.65rem;
+    color: #065f46;
+    background: rgba(52, 211, 153, 0.2);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+  }
+
   .hero-orbit {
     position: absolute;
     border: 1px solid rgba(16, 35, 61, 0.08);

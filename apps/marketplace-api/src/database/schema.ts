@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { boolean, integer, jsonb, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core'
+import type { MarketplaceSkillStatus, MarketplaceVersionStatus } from '@proma/marketplace-domain'
 
 export const categories = pgTable('categories', {
   id: text('id').primaryKey(),
@@ -21,8 +22,11 @@ export const skills = pgTable('skills', {
   icon: text('icon').notNull(),
   featured: boolean('featured').notNull().default(false),
   installs: integer('installs').notNull().default(0),
-  status: text('status').notNull(),
+  status: text('status').$type<MarketplaceSkillStatus>().notNull(),
   currentPublishedVersionId: text('current_published_version_id'),
+  revision: integer('revision').notNull().default(1),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  deletedBy: text('deleted_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
@@ -35,9 +39,11 @@ export const skillVersions = pgTable('skill_versions', {
   sha256: text('sha256').notNull(),
   size: integer('size').notNull(),
   fileCount: integer('file_count').notNull(),
-  status: text('status').notNull(),
+  status: text('status').$type<MarketplaceVersionStatus>().notNull(),
+  revision: integer('revision').notNull().default(1),
   publishedAt: timestamp('published_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const versionFiles = pgTable('version_files', {
