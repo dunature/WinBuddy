@@ -101,7 +101,7 @@ export function MarketplaceCatalogPage(): React.ReactElement {
                 <Store size={16} /> Proma 技能市场
               </div>
               <h1 className="text-2xl font-semibold tracking-tight">为 Agent 找到下一项能力</h1>
-              <p className="mt-1.5 text-sm text-muted-foreground">浏览社区发布的技能。安装与更新将在后续版本开放。</p>
+              <p className="mt-1.5 text-sm text-muted-foreground">浏览社区发布的技能，并安装到当前 Agent 工作区。</p>
             </div>
             <div className="text-xs text-muted-foreground">共 {state.pageInfo.total} 项</div>
           </div>

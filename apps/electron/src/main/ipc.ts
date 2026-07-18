@@ -937,6 +937,12 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(
+    MARKETPLACE_IPC_CHANNELS.CONFIRM_CONFLICT,
+    async (_, installId: string): Promise<MarketplaceInstallState> =>
+      marketplaceInstaller.confirmConflict(installId)
+  )
+
+  ipcMain.handle(
     MARKETPLACE_IPC_CHANNELS.CANCEL,
     async (_, installId: string): Promise<boolean> => marketplaceInstaller.cancel(installId)
   )

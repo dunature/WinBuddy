@@ -106,6 +106,24 @@ export interface MarketplaceInstallManifest {
 }
 
 export type MarketplaceInstallAction = 'install' | 'update'
+export type MarketplaceInstallErrorCode =
+  | 'TARGET_CONFLICT'
+  | 'CONFLICT_STALE'
+  | 'ALREADY_INSTALLED'
+  | 'UPDATE_SOURCE_MISMATCH'
+  | 'DOWNLOAD_NETWORK'
+  | 'DOWNLOAD_TIMEOUT'
+  | 'DOWNLOAD_HTTP'
+  | 'DOWNLOAD_REDIRECT'
+  | 'DOWNLOAD_TOO_LARGE'
+  | 'DOWNLOAD_WRITE_FAILED'
+  | 'VERIFY_SIZE'
+  | 'VERIFY_HASH'
+  | 'VERIFY_ARCHIVE'
+  | 'EXTRACT_FAILED'
+  | 'COMMIT_FAILED'
+export type MarketplaceInstallConflictKind = 'non_marketplace' | 'different_marketplace'
+export type MarketplaceInstallConflictLocation = 'enabled' | 'disabled'
 export type MarketplaceInstallPhase =
   | 'queued'
   | 'downloading'
@@ -116,10 +134,23 @@ export type MarketplaceInstallPhase =
   | 'failed'
   | 'cancelled'
 
+export type MarketplaceInstallFailurePhase = Exclude<
+  MarketplaceInstallPhase,
+  'completed' | 'failed' | 'cancelled'
+>
+
 export interface MarketplaceInstallRequest {
   workspaceSlug: string
   marketplaceSkillId: string
   version: string
+}
+
+export interface MarketplaceInstallConflict {
+  kind: MarketplaceInstallConflictKind
+  identifier: string
+  location: MarketplaceInstallConflictLocation
+  replaceable: boolean
+  existingMarketplaceSkillId?: string
 }
 
 export interface MarketplaceInstallState extends MarketplaceInstallRequest {
@@ -128,6 +159,9 @@ export interface MarketplaceInstallState extends MarketplaceInstallRequest {
   phase: MarketplaceInstallPhase
   identifier?: string
   error?: string
+  errorCode?: MarketplaceInstallErrorCode
+  failedAt?: MarketplaceInstallFailurePhase
+  conflict?: MarketplaceInstallConflict
   createdAt: string
   updatedAt: string
 }
@@ -136,6 +170,9 @@ export interface MarketplaceInstallStatus {
   installId: string
   phase: MarketplaceInstallPhase
   error?: string
+  errorCode?: MarketplaceInstallErrorCode
+  failedAt?: MarketplaceInstallFailurePhase
+  conflict?: MarketplaceInstallConflict
 }
 
 export interface MarketplaceAdminIdentity {
@@ -249,6 +286,7 @@ export const MARKETPLACE_IPC_CHANNELS = {
   GET_INSTALL_STATUS: 'marketplace:get-install-status',
   INSTALL: 'marketplace:install',
   UPDATE: 'marketplace:update',
+  CONFIRM_CONFLICT: 'marketplace:confirm-conflict',
   CANCEL: 'marketplace:cancel',
   INSTALL_PROGRESS: 'marketplace:install-progress',
 } as const

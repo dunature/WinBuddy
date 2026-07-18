@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { initialMarketplaceState, toMarketplaceListQuery, withMarketplaceInstallState } from './marketplace-atoms'
+import {
+  findMarketplaceInstallTask,
+  initialMarketplaceState,
+  marketplaceInstallPhaseLabel,
+  toMarketplaceListQuery,
+  withMarketplaceInstallState,
+} from './marketplace-atoms'
 import type { MarketplaceInstallState } from '@proma/shared'
 
 describe('技能市场查询状态', () => {
@@ -47,4 +53,37 @@ test('Given 多个安装进度 When 写入 Jotai Map Then 按 installId 独立�
   expect(tasks.size).toBe(2)
   expect(tasks.get('install-1')?.phase).toBe('completed')
   expect(tasks.get('install-2')?.phase).toBe('queued')
+})
+
+test('Given 冲突确认产生新任务 When 查找当前安装 Then 优先返回最新任务', () => {
+  const failed: MarketplaceInstallState = {
+    installId: 'install-conflict', action: 'install', phase: 'failed', workspaceSlug: 'research',
+    marketplaceSkillId: 'skill-1', version: '1.0.0', createdAt: '2026-07-18T00:00:00.000Z', updatedAt: '2026-07-18T00:00:01.000Z',
+    errorCode: 'TARGET_CONFLICT',
+  }
+  const downloading: MarketplaceInstallState = {
+    ...failed,
+    installId: 'install-confirmed',
+    phase: 'downloading',
+    createdAt: '2026-07-18T00:01:00.000Z',
+    updatedAt: '2026-07-18T00:01:01.000Z',
+    errorCode: undefined,
+  }
+
+  const current = findMarketplaceInstallTask(
+    new Map([[failed.installId, failed], [downloading.installId, downloading]]),
+    'research',
+    'skill-1',
+    '1.0.0',
+  )
+
+  expect(current?.installId).toBe('install-confirmed')
+})
+
+test('Given 固定安装阶段 When 显示进度 Then 每个阶段都有中文标签', () => {
+  expect([
+    'queued', 'downloading', 'verifying', 'extracting', 'committing', 'completed', 'failed', 'cancelled',
+  ].map((phase) => marketplaceInstallPhaseLabel(phase as MarketplaceInstallState['phase']))).toEqual([
+    '等待安装', '正在下载', '正在校验', '正在解压', '正在提交', '安装完成', '安装失败', '已取消',
+  ])
 })
