@@ -8,6 +8,9 @@ import type {
   MarketplaceAdminVersion,
   MarketplaceAdminVersionActionResult,
   MarketplaceAdminTag,
+  MarketplaceBulkGovernanceAction,
+  MarketplaceBulkGovernanceResult,
+  MarketplaceBulkGovernanceTarget,
   MarketplaceVersionGovernanceAction,
   MarketplaceApiPage,
   MarketplaceApiSuccess,
@@ -266,4 +269,21 @@ export async function performAdminVersionAction(
       body: JSON.stringify({ reason }),
     },
   )
+}
+
+export async function performAdminBulkGovernance(
+  action: MarketplaceBulkGovernanceAction,
+  items: MarketplaceBulkGovernanceTarget[],
+  reason: string,
+  csrfToken: string,
+): Promise<MarketplaceBulkGovernanceResult> {
+  return adminRequest(`/admin/bulk-actions/${action}`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-csrf-token': csrfToken,
+      'idempotency-key': crypto.randomUUID(),
+    },
+    body: JSON.stringify({ items, reason }),
+  })
 }
