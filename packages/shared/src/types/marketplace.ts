@@ -160,6 +160,15 @@ export interface MarketplaceAdminSkillDetail extends MarketplaceAdminSkillSummar
   versions: MarketplaceAdminVersion[]
 }
 
+export type MarketplaceGoldenPathAction = 'submit_review' | 'approve' | 'publish'
+
+export interface MarketplaceAdminVersionActionResult {
+  action: MarketplaceGoldenPathAction
+  changed: boolean
+  skill: MarketplaceAdminSkillDetail
+  version: MarketplaceAdminVersion
+}
+
 export type MarketplaceUploadStatus = 'queued' | 'running' | 'succeeded' | 'failed'
 
 export interface MarketplaceValidationCheck {

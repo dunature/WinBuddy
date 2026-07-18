@@ -307,6 +307,65 @@ export const MARKETPLACE_VERSION_STATUSES = [
 export type MarketplaceSkillStatus = typeof MARKETPLACE_SKILL_STATUSES[number]
 export type MarketplaceVersionStatus = typeof MARKETPLACE_VERSION_STATUSES[number]
 
+export type MarketplaceGoldenPathAction = 'submit_review' | 'approve' | 'publish'
+
+export interface MarketplaceGoldenPathState {
+  action: MarketplaceGoldenPathAction
+  versionId: string
+  versionStatus: MarketplaceVersionStatus
+  skillStatus: MarketplaceSkillStatus
+  currentPublishedVersionId: string | null
+}
+
+export interface MarketplaceGoldenPathResult {
+  changed: boolean
+  versionStatus: MarketplaceVersionStatus
+  skillStatus: MarketplaceSkillStatus
+  currentPublishedVersionId: string | null
+}
+
+export class MarketplaceGoldenPathError extends Error {
+  constructor(readonly code: 'MARKETPLACE_VERSION_ACTION_NOT_ALLOWED' | 'MARKETPLACE_PUBLISHED_POINTER_MISMATCH') {
+    super(code)
+    this.name = 'MarketplaceGoldenPathError'
+  }
+}
+
+const goldenPathTransitions: Record<MarketplaceGoldenPathAction, {
+  from: MarketplaceVersionStatus
+  to: MarketplaceVersionStatus
+}> = {
+  submit_review: { from: 'created', to: 'pending_review' },
+  approve: { from: 'pending_review', to: 'approved' },
+  publish: { from: 'approved', to: 'published' },
+}
+
+export function applyMarketplaceGoldenPathAction(
+  state: MarketplaceGoldenPathState,
+): MarketplaceGoldenPathResult {
+  const transition = goldenPathTransitions[state.action]
+  if (state.versionStatus === transition.to) {
+    if (state.action === 'publish' && state.currentPublishedVersionId !== state.versionId) {
+      throw new MarketplaceGoldenPathError('MARKETPLACE_PUBLISHED_POINTER_MISMATCH')
+    }
+    return {
+      changed: false,
+      versionStatus: state.versionStatus,
+      skillStatus: state.skillStatus,
+      currentPublishedVersionId: state.currentPublishedVersionId,
+    }
+  }
+  if (state.versionStatus !== transition.from) {
+    throw new MarketplaceGoldenPathError('MARKETPLACE_VERSION_ACTION_NOT_ALLOWED')
+  }
+  return {
+    changed: true,
+    versionStatus: transition.to,
+    skillStatus: state.action === 'publish' ? 'published' : state.skillStatus,
+    currentPublishedVersionId: state.action === 'publish' ? state.versionId : state.currentPublishedVersionId,
+  }
+}
+
 export interface MarketplaceDraftSkillState {
   status: 'draft'
   currentPublishedVersionId: null
