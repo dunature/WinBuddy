@@ -1,6 +1,6 @@
 {
   "name": "@proma/marketplace-web",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "license": "AGPL-3.0-only",
   "description": "Web application for the Proma marketplace",
   "type": "module",

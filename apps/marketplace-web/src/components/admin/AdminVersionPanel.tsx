@@ -1,7 +1,9 @@
 import * as React from 'react'
+import { useAtom } from 'jotai'
 import { GitBranchPlus, LoaderCircle, PackageOpen } from 'lucide-react'
 import type { MarketplaceAdminSkillDetail, MarketplaceAdminUpload, MarketplaceAdminVersion } from '@proma/shared'
 import { createAdminVersion } from '../../admin-api'
+import { adminBulkSelectionAtom, updateBulkSelection } from '../../admin-bulk-state'
 import { AdminVersionUploadPanel } from './AdminVersionUploadPanel'
 import { AdminVersionActions } from './AdminVersionActions'
 
@@ -14,6 +16,7 @@ interface AdminVersionPanelProps {
 }
 
 export function AdminVersionPanel({ skill, csrfToken, onCreated, onVersionChanged, onActionCompleted }: AdminVersionPanelProps): React.ReactElement {
+  const [bulkSelection, setBulkSelection] = useAtom(adminBulkSelectionAtom)
   const [creating, setCreating] = React.useState(false)
   const [version, setVersion] = React.useState('')
   const [changelog, setChangelog] = React.useState('')
@@ -75,6 +78,17 @@ export function AdminVersionPanel({ skill, csrfToken, onCreated, onVersionChange
         ) : skill.versions.map((item) => (
           <article key={item.id} className="rounded-[20px] bg-[#f2eee5] px-5 py-4">
             <div className="flex flex-wrap items-center gap-4">
+              <input
+                type="checkbox"
+                aria-label={`选择版本 ${item.version}`}
+                checked={bulkSelection.has(`version:${item.id}`)}
+                onChange={(event) => setBulkSelection((current) => updateBulkSelection(current, {
+                  key: `version:${item.id}`,
+                  skillId: skill.id,
+                  versionId: item.id,
+                  label: `${skill.name} v${item.version}`,
+                }, event.target.checked))}
+              />
               <div className="min-w-0 flex-1">
                 <div className="font-mono text-sm font-bold text-[var(--ink)]">{item.version}</div>
                 <div className="mt-1 truncate text-xs text-[var(--muted)]">{item.changelog || '暂无更新说明'}</div>

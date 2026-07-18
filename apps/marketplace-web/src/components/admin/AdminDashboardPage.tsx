@@ -18,8 +18,10 @@ import {
   logoutAdmin,
 } from '../../admin-api'
 import { adminDraftWorkspaceAtom } from '../../admin-draft-state'
+import { adminBulkSelectionAtom, adminBulkStateAtom, updateBulkSelection } from '../../admin-bulk-state'
 import { adminAuthAtom } from '../../admin-state'
 import { AdminSkillEditor } from './AdminSkillEditor'
+import { AdminBulkBar } from './AdminBulkBar'
 import { AdminTaxonomyPanel } from './AdminTaxonomyPanel'
 import { AdminVersionPanel } from './AdminVersionPanel'
 
@@ -34,6 +36,8 @@ function upsertSkill(
 export function AdminDashboardPage(): React.ReactElement {
   const [auth, setAuth] = useAtom(adminAuthAtom)
   const [workspace, setWorkspace] = useAtom(adminDraftWorkspaceAtom)
+  const [bulkSelection, setBulkSelection] = useAtom(adminBulkSelectionAtom)
+  const [, setBulkState] = useAtom(adminBulkStateAtom)
   const navigate = useNavigate()
   const [logoutError, setLogoutError] = React.useState<string | null>(null)
 
@@ -159,6 +163,8 @@ export function AdminDashboardPage(): React.ReactElement {
     try {
       await logoutAdmin(auth.session.csrfToken)
       setAuth({ status: 'unauthenticated', session: null })
+      setBulkSelection(new Map())
+      setBulkState({ phase: 'idle', action: null, result: null, error: null })
       setWorkspace({ status: 'idle', items: [], categories: [], tags: [], selectedSkill: null, creating: false, error: null })
       navigate('/admin/login', { replace: true })
     } catch (requestError) {
@@ -212,6 +218,8 @@ export function AdminDashboardPage(): React.ReactElement {
           />
         )}
 
+        <AdminBulkBar csrfToken={csrfToken} onCompleted={() => { void loadWorkspace() }} />
+
         {workspace.status === 'loading' && workspace.items.length === 0 ? (
           <div className="grid min-h-[420px] place-items-center rounded-[28px] bg-white/[0.05]">
             <div className="flex items-center gap-3 text-sm text-white/55"><LoaderCircle className="animate-spin" size={18} /> 正在读取草稿档案</div>
@@ -233,18 +241,30 @@ export function AdminDashboardPage(): React.ReactElement {
                 ) : workspace.items.map((item, index) => {
                   const selected = workspace.selectedSkill?.id === item.id && !workspace.creating
                   return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => { void selectSkill(item.id) }}
-                      className={`group w-full rounded-[20px] px-4 py-4 text-left transition ${selected ? 'bg-emerald-300 text-emerald-950' : 'bg-white/[0.045] hover:bg-white/[0.08]'}`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className={`font-mono text-[10px] font-bold ${selected ? 'text-emerald-800' : 'text-white/25'}`}>{String(index + 1).padStart(2, '0')}</span>
-                        <span className="min-w-0 flex-1"><span className="block truncate text-sm font-bold">{item.name}</span><span className={`mt-1 block truncate font-mono text-[10px] ${selected ? 'text-emerald-800' : 'text-white/35'}`}>{item.identifier}</span></span>
-                        <span className={`text-[9px] font-bold uppercase ${selected ? 'text-emerald-800' : 'text-emerald-300'}`}>{item.status}</span>
-                      </div>
-                    </button>
+                    <div key={item.id} className={`flex items-center gap-2 rounded-[20px] px-3 ${selected ? 'bg-emerald-300 text-emerald-950' : 'bg-white/[0.045]'}`}>
+                      <input
+                        type="checkbox"
+                        aria-label={`选择 Skill ${item.name}`}
+                        checked={bulkSelection.has(`skill:${item.id}`)}
+                        onChange={(event) => setBulkSelection((current) => updateBulkSelection(current, {
+                          key: `skill:${item.id}`,
+                          skillId: item.id,
+                          revision: item.revision,
+                          label: item.name,
+                        }, event.target.checked))}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => { void selectSkill(item.id) }}
+                        className="group min-w-0 flex-1 py-4 text-left"
+                      >
+                        <span className="flex items-start gap-3">
+                          <span className={`font-mono text-[10px] font-bold ${selected ? 'text-emerald-800' : 'text-white/25'}`}>{String(index + 1).padStart(2, '0')}</span>
+                          <span className="min-w-0 flex-1"><span className="block truncate text-sm font-bold">{item.name}</span><span className={`mt-1 block truncate font-mono text-[10px] ${selected ? 'text-emerald-800' : 'text-white/35'}`}>{item.identifier}</span></span>
+                          <span className={`text-[9px] font-bold uppercase ${selected ? 'text-emerald-800' : 'text-emerald-300'}`}>{item.status}</span>
+                        </span>
+                      </button>
+                    </div>
                   )
                 })}
               </div>

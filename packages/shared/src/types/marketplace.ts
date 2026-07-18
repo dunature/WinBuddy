@@ -280,6 +280,30 @@ export interface MarketplaceAdminVersionActionResult {
   version: MarketplaceAdminVersion
 }
 
+export type MarketplaceBulkGovernanceAction = 'unpublish' | 'archive' | 'delete_draft'
+export type MarketplaceBulkGovernanceOutcome = 'succeeded' | 'skipped' | 'failed'
+
+export interface MarketplaceBulkGovernanceTarget {
+  key: string
+  skillId: string
+  versionId?: string
+  revision?: number
+  label?: string
+}
+
+export interface MarketplaceBulkGovernanceItemResult extends MarketplaceBulkGovernanceTarget {
+  outcome: MarketplaceBulkGovernanceOutcome
+  code: string
+  message: string
+}
+
+export interface MarketplaceBulkGovernanceResult {
+  action: MarketplaceBulkGovernanceAction
+  succeeded: MarketplaceBulkGovernanceItemResult[]
+  skipped: MarketplaceBulkGovernanceItemResult[]
+  failed: MarketplaceBulkGovernanceItemResult[]
+}
+
 export type MarketplaceUploadStatus = 'queued' | 'running' | 'succeeded' | 'failed'
 
 export interface MarketplaceValidationCheck {

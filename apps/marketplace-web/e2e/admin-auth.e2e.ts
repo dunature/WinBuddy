@@ -124,6 +124,28 @@ test('Given 初始管理员 When 登录改密且会话到期 Then 管理路由�
   await expect(page.getByText('最新 v1.0.0', { exact: true })).toBeVisible()
   await page.goto('/agent/marketplace/admin')
   await expect(page.getByText('每日简报助手', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '新建候选版本' }).click()
+  await page.getByLabel('版本号').fill('1.1.0')
+  await page.getByLabel('更新说明').fill('用于批量部分失败验证。')
+  await page.getByRole('button', { name: '保存候选版本' }).click()
+  await page.getByLabel('选择版本 1.0.0').check()
+  await page.getByLabel('选择版本 1.1.0').check()
+  await page.getByLabel('批量治理原因').fill('批量维护验证')
+  await page.getByRole('button', { name: '批量下架' }).click()
+  await expect(page.getByText('成功 1 · 跳过 0 · 失败 1')).toBeVisible()
+  await expect(page.getByText(/VERSION_ACTION_NOT_ALLOWED/)).toBeVisible()
+
+  const retryRequestPromise = page.waitForRequest((request) => request.url().includes('/bulk-actions/unpublish'))
+  await page.getByRole('button', { name: '仅重试失败项' }).click()
+  const retryRequest = await retryRequestPromise
+  const retryBody = retryRequest.postDataJSON() as { items: Array<{ key: string }> }
+  expect(retryBody.items).toHaveLength(1)
+  expect(retryBody.items[0]?.key).toContain('version:')
+  await expect(page.getByText('成功 0 · 跳过 0 · 失败 1')).toBeVisible()
+  await page.getByRole('button', { name: '清空批量选择' }).click()
+  await page.getByRole('button', { name: '重新发布' }).click()
+
   await page.getByRole('button', { name: '下架', exact: true }).click()
   await page.getByLabel('下架原因').fill('临时维护')
   await page.getByRole('button', { name: '确认下架' }).click()
@@ -134,9 +156,9 @@ test('Given 初始管理员 When 登录改密且会话到期 Then 管理路由�
   await page.getByRole('button', { name: '下架', exact: true }).click()
   await page.getByLabel('下架原因').fill('停止维护')
   await page.getByRole('button', { name: '确认下架' }).click()
-  await page.getByRole('button', { name: '归档', exact: true }).click()
-  await page.getByLabel('归档原因').fill('版本生命周期结束')
-  await page.getByRole('button', { name: '确认归档' }).click()
+  await governedVersion.getByRole('button', { name: '归档', exact: true }).click()
+  await governedVersion.getByLabel('归档原因').fill('版本生命周期结束')
+  await governedVersion.getByRole('button', { name: '确认归档' }).click()
   await expect(governedVersion.getByText('archived', { exact: true })).toBeVisible()
 
   await page.route('**/api/v1/admin/skills?**', async (route) => {
