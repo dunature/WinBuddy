@@ -1,8 +1,25 @@
 import { randomUUID } from 'node:crypto'
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { serveStatic } from 'hono/bun'
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { MARKETPLACE_MAX_TEXT_PREVIEW_BYTES } from '@proma/marketplace-domain'
 import type { MarketplaceDatabase } from './database/client'
+import {
+  ADMIN_CSRF_COOKIE,
+  ADMIN_LOGIN_CSRF_COOKIE,
+  ADMIN_SESSION_COOKIE,
+  ADMIN_SESSION_DURATION_MS,
+  authenticateMarketplaceAdminSession,
+  changeMarketplaceAdminPassword,
+  createMarketplaceLoginCsrfToken,
+  getMarketplaceAdminSession,
+  loginMarketplaceAdmin,
+  logoutMarketplaceAdmin,
+  marketplaceTokensMatch,
+  validateMarketplaceAdminCsrf,
+  type AuthenticatedAdminSession,
+  type CreatedAdminSession,
+} from './admin-auth'
 import {
   getPublicInstallManifest,
   getPublicSkill,
@@ -14,6 +31,7 @@ import {
 interface MarketplaceAppEnv {
   Variables: {
     requestId: string
+    adminSession: AuthenticatedAdminSession
   }
 }
 
@@ -21,16 +39,99 @@ export interface CreateMarketplaceAppOptions {
   database: MarketplaceDatabase
   requestIdFactory?: () => string
   webRoot?: string
+  allowedOrigin?: string
+  now?: () => Date
+  sessionDurationMs?: number
+}
+
+function requestIp(context: Context<MarketplaceAppEnv>): string {
+  return context.req.header('x-forwarded-for')?.split(',', 1)[0]?.trim()
+    || context.req.header('x-real-ip')?.trim()
+    || 'unknown'
+}
+
+function setAdminSessionCookies(
+  context: Context<MarketplaceAppEnv>,
+  session: CreatedAdminSession,
+  maxAge: number,
+): void {
+  setCookie(context, ADMIN_SESSION_COOKIE, session.sessionToken, {
+    path: '/',
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Lax',
+    maxAge,
+  })
+  setCookie(context, ADMIN_CSRF_COOKIE, session.csrfToken, {
+    path: '/',
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Lax',
+    maxAge,
+  })
 }
 
 export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono<MarketplaceAppEnv> {
   const app = new Hono<MarketplaceAppEnv>()
   const requestIdFactory = options.requestIdFactory ?? randomUUID
+  const allowedOrigin = options.allowedOrigin ?? 'https://www.feiyangclaw.com'
+  const sessionDurationMs = options.sessionDurationMs ?? ADMIN_SESSION_DURATION_MS
+  const sessionMaxAge = Math.floor(sessionDurationMs / 1000)
 
   app.use('*', async (context, next) => {
     const requestId = requestIdFactory()
     context.set('requestId', requestId)
     context.header('x-request-id', requestId)
+    await next()
+  })
+
+  app.use('/api/v1/admin/*', async (context, next) => {
+    if (context.req.path === '/api/v1/admin/auth/login'
+      || context.req.path === '/api/v1/admin/auth/login-challenge') {
+      await next()
+      return
+    }
+
+    const sessionToken = getCookie(context, ADMIN_SESSION_COOKIE)
+    const session = sessionToken
+      ? await authenticateMarketplaceAdminSession(options.database, sessionToken, { now: options.now })
+      : null
+    if (!session) {
+      return context.json({
+        error: { code: 'ADMIN_UNAUTHORIZED', message: '管理员会话无效或已过期' },
+        requestId: context.get('requestId'),
+      }, 401)
+    }
+    context.set('adminSession', session)
+
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(context.req.method)) {
+      if (context.req.header('origin') !== allowedOrigin) {
+        return context.json({
+          error: { code: 'ORIGIN_FORBIDDEN', message: '请求来源不受信任' },
+          requestId: context.get('requestId'),
+        }, 403)
+      }
+      const csrfValid = await validateMarketplaceAdminCsrf(
+        options.database,
+        session.id,
+        context.req.header('x-csrf-token') ?? '',
+      )
+      if (!csrfValid) {
+        return context.json({
+          error: { code: 'ADMIN_CSRF_INVALID', message: 'CSRF token 无效或已过期' },
+          requestId: context.get('requestId'),
+        }, 403)
+      }
+      const passwordChangeExempt = context.req.path === '/api/v1/admin/auth/change-password'
+        || context.req.path === '/api/v1/admin/auth/logout'
+      if (session.mustChangePassword && !passwordChangeExempt) {
+        return context.json({
+          error: { code: 'ADMIN_PASSWORD_CHANGE_REQUIRED', message: '请先修改初始密码' },
+          requestId: context.get('requestId'),
+        }, 403)
+      }
+    }
+
     await next()
   })
 
@@ -64,6 +165,136 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
       data: { status: 'ready' },
       requestId: context.get('requestId'),
     })
+  })
+
+  app.post('/api/v1/admin/auth/login', async (context) => {
+    if (context.req.header('origin') !== allowedOrigin) {
+      return context.json({
+        error: { code: 'ORIGIN_FORBIDDEN', message: '请求来源不受信任' },
+        requestId: context.get('requestId'),
+      }, 403)
+    }
+    const loginCsrfCookie = getCookie(context, ADMIN_LOGIN_CSRF_COOKIE) ?? ''
+    const loginCsrfHeader = context.req.header('x-csrf-token') ?? ''
+    if (!marketplaceTokensMatch(loginCsrfCookie, loginCsrfHeader)) {
+      return context.json({
+        error: { code: 'ADMIN_CSRF_INVALID', message: 'CSRF token 无效或已过期' },
+        requestId: context.get('requestId'),
+      }, 403)
+    }
+    let body: unknown
+    try {
+      body = await context.req.json()
+    } catch {
+      body = null
+    }
+    if (!body || typeof body !== 'object' || !('username' in body) || !('password' in body)
+      || typeof body.username !== 'string' || typeof body.password !== 'string') {
+      return context.json({
+        error: { code: 'INVALID_REQUEST', message: '请输入管理员用户名和密码' },
+        requestId: context.get('requestId'),
+      }, 400)
+    }
+    const session = await loginMarketplaceAdmin(options.database, {
+      username: body.username,
+      password: body.password,
+      requestId: context.get('requestId'),
+      ipAddress: requestIp(context),
+      now: options.now,
+      sessionDurationMs,
+    })
+    if ('error' in session) {
+      if (session.error === 'rate_limited') {
+        return context.json({
+          error: { code: 'ADMIN_LOGIN_RATE_LIMITED', message: '登录失败次数过多，请 15 分钟后重试' },
+          requestId: context.get('requestId'),
+        }, 429)
+      }
+      return context.json({
+        error: { code: 'ADMIN_INVALID_CREDENTIALS', message: '管理员用户名或密码错误' },
+        requestId: context.get('requestId'),
+      }, 401)
+    }
+    setAdminSessionCookies(context, session, sessionMaxAge)
+    deleteCookie(context, ADMIN_LOGIN_CSRF_COOKIE, { path: '/', secure: true })
+    return context.json({ data: session.data, requestId: context.get('requestId') })
+  })
+
+  app.get('/api/v1/admin/auth/login-challenge', (context) => {
+    const csrfToken = createMarketplaceLoginCsrfToken()
+    setCookie(context, ADMIN_LOGIN_CSRF_COOKIE, csrfToken, {
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+      maxAge: 10 * 60,
+    })
+    return context.json({ data: { csrfToken }, requestId: context.get('requestId') })
+  })
+
+  app.get('/api/v1/admin/auth/session', async (context) => {
+    const sessionToken = getCookie(context, ADMIN_SESSION_COOKIE)
+    const session = sessionToken
+      ? await getMarketplaceAdminSession(options.database, sessionToken, {
+        now: options.now,
+        sessionDurationMs,
+      }, getCookie(context, ADMIN_CSRF_COOKIE))
+      : null
+    if (!session) {
+      return context.json({
+        error: { code: 'ADMIN_UNAUTHORIZED', message: '管理员会话无效或已过期' },
+        requestId: context.get('requestId'),
+      }, 401)
+    }
+    setAdminSessionCookies(context, session, sessionMaxAge)
+    return context.json({ data: session.data, requestId: context.get('requestId') })
+  })
+
+  app.post('/api/v1/admin/auth/change-password', async (context) => {
+    let body: unknown
+    try {
+      body = await context.req.json()
+    } catch {
+      body = null
+    }
+    if (!body || typeof body !== 'object' || !('currentPassword' in body) || !('newPassword' in body)
+      || typeof body.currentPassword !== 'string' || typeof body.newPassword !== 'string') {
+      return context.json({
+        error: { code: 'INVALID_REQUEST', message: '请输入当前密码和新密码' },
+        requestId: context.get('requestId'),
+      }, 400)
+    }
+    const result = await changeMarketplaceAdminPassword(options.database, context.get('adminSession'), {
+      currentPassword: body.currentPassword,
+      newPassword: body.newPassword,
+      requestId: context.get('requestId'),
+      ipAddress: requestIp(context),
+      now: options.now,
+    })
+    if ('error' in result) {
+      const errors = {
+        current_password_invalid: ['ADMIN_CURRENT_PASSWORD_INVALID', '当前密码不正确'],
+        password_unchanged: ['ADMIN_PASSWORD_UNCHANGED', '新密码不能与当前密码相同'],
+        password_weak: ['ADMIN_PASSWORD_WEAK', '新密码至少需要 12 个字符'],
+      } as const
+      const [code, message] = errors[result.error]
+      return context.json({
+        error: { code, message },
+        requestId: context.get('requestId'),
+      }, 400)
+    }
+    return context.json({ data: result.data, requestId: context.get('requestId') })
+  })
+
+  app.post('/api/v1/admin/auth/logout', async (context) => {
+    await logoutMarketplaceAdmin(options.database, context.get('adminSession'), {
+      requestId: context.get('requestId'),
+      ipAddress: requestIp(context),
+      now: options.now,
+    })
+    deleteCookie(context, ADMIN_SESSION_COOKIE, { path: '/', secure: true })
+    deleteCookie(context, ADMIN_CSRF_COOKIE, { path: '/', secure: true })
+    return context.json({ data: { loggedOut: true }, requestId: context.get('requestId') })
   })
 
   app.get('/api/v1/marketplace/categories', async (context) => context.json({

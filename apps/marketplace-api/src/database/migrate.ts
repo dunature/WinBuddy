@@ -5,6 +5,10 @@ const migrations = [
     id: '0000_public_catalog',
     file: new URL('../../migrations/0000_public_catalog.sql', import.meta.url),
   },
+  {
+    id: '0001_admin_auth',
+    file: new URL('../../migrations/0001_admin_auth.sql', import.meta.url),
+  },
 ] as const
 
 export async function runMarketplaceMigrations(sql: Sql): Promise<void> {

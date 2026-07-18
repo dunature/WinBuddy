@@ -1,9 +1,9 @@
-import { loadMarketplaceConfig } from './config'
+import { loadMarketplaceDatabaseUrl } from './config'
 import { createMarketplaceDatabase } from './database/client'
 import { runMarketplaceMigrations } from './database/migrate'
 
-const config = loadMarketplaceConfig()
-const database = createMarketplaceDatabase(config.databaseUrl)
+const databaseUrl = loadMarketplaceDatabaseUrl()
+const database = createMarketplaceDatabase(databaseUrl)
 
 try {
   await runMarketplaceMigrations(database.sql)

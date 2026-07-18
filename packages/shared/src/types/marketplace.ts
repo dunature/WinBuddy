@@ -105,6 +105,16 @@ export interface MarketplaceInstallManifest {
   downloadUrl?: string
 }
 
+export interface MarketplaceAdminIdentity {
+  username: string
+  mustChangePassword: boolean
+}
+
+export interface MarketplaceAdminSession {
+  admin: MarketplaceAdminIdentity
+  csrfToken: string
+}
+
 export const MARKETPLACE_IPC_CHANNELS = {
   LIST_CATEGORIES: 'marketplace:list-categories',
   LIST_SKILLS: 'marketplace:list-skills',

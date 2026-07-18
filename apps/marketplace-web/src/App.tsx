@@ -4,6 +4,10 @@ import { ArrowLeft } from 'lucide-react'
 import { CatalogPage } from './components/CatalogPage'
 import { DetailPage } from './components/DetailPage'
 import { MarketplaceLayout } from './components/MarketplaceLayout'
+import { AdminChangePasswordPage } from './components/admin/AdminChangePasswordPage'
+import { AdminDashboardPage } from './components/admin/AdminDashboardPage'
+import { AdminGuard } from './components/admin/AdminGuard'
+import { AdminLoginPage } from './components/admin/AdminLoginPage'
 
 function RouteNotFound(): React.ReactElement {
   return (
@@ -19,6 +23,11 @@ export function App(): React.ReactElement {
   return (
     <BrowserRouter basename="/agent/marketplace">
       <Routes>
+        <Route path="admin/login" element={<AdminLoginPage />} />
+        <Route path="admin" element={<AdminGuard />}>
+          <Route index element={<AdminDashboardPage />} />
+          <Route path="change-password" element={<AdminChangePasswordPage />} />
+        </Route>
         <Route element={<MarketplaceLayout />}>
           <Route index element={<CatalogPage />} />
           <Route path="skills/:identifier" element={<DetailPage />} />

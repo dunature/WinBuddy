@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { boolean, integer, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core'
+import { boolean, integer, jsonb, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core'
 
 export const categories = pgTable('categories', {
   id: text('id').primaryKey(),
@@ -47,3 +47,36 @@ export const versionFiles = pgTable('version_files', {
   isText: boolean('is_text').notNull(),
   content: text('content'),
 }, (table) => [primaryKey({ columns: [table.versionId, table.path] })])
+
+export const admins = pgTable('admins', {
+  id: text('id').primaryKey(),
+  username: text('username').notNull(),
+  normalizedUsername: text('normalized_username').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  mustChangePassword: boolean('must_change_password').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const adminSessions = pgTable('admin_sessions', {
+  id: text('id').primaryKey(),
+  adminId: text('admin_id').notNull().references(() => admins.id, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull().unique(),
+  csrfTokenHash: text('csrf_token_hash').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  invalidatedAt: timestamp('invalidated_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const auditEntries = pgTable('audit_entries', {
+  id: text('id').primaryKey(),
+  actorId: text('actor_id').references(() => admins.id, { onDelete: 'set null' }),
+  actorIdentifier: text('actor_identifier'),
+  action: text('action').notNull(),
+  requestId: text('request_id').notNull(),
+  ipAddress: text('ip_address'),
+  beforeState: jsonb('before_state'),
+  afterState: jsonb('after_state'),
+  reason: text('reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
