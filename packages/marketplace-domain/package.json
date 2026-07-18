@@ -1,6 +1,6 @@
 {
   "name": "@proma/marketplace-domain",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "license": "AGPL-3.0-only",
   "description": "Pure domain rules for the Proma marketplace",
   "type": "module",

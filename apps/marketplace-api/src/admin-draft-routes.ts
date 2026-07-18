@@ -35,6 +35,22 @@ function requiredString(
   return normalized
 }
 
+function optionalStringList(
+  source: Record<string, unknown>,
+  key: string,
+  label: string,
+  maxItems: number,
+  maxLength: number,
+): string[] | undefined {
+  if (!(key in source)) return undefined
+  const values = source[key]
+  if (!Array.isArray(values) || values.length > maxItems
+    || values.some((value) => typeof value !== 'string' || !value.trim() || value.trim().length > maxLength)) {
+    throw invalidRequest(`${label}必须是最多 ${maxItems} 个、每项不超过 ${maxLength} 个字符的非空字符串`)
+  }
+  return [...new Set(values.map((value) => (value as string).trim()))]
+}
+
 function parseCreateSkillBody(body: unknown): CreateMarketplaceAdminSkillInput {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) throw invalidRequest('请求体格式不正确')
   const source = body as Record<string, unknown>
@@ -42,12 +58,8 @@ function parseCreateSkillBody(body: unknown): CreateMarketplaceAdminSkillInput {
   if (!isMarketplaceIdentifier(identifier)) {
     throw invalidRequest('identifier 仅允许小写字母、数字和单个短横线，且必须以字母开头')
   }
-  const rawTags = source.tags ?? []
-  if (!Array.isArray(rawTags) || rawTags.length > 20
-    || rawTags.some((tag) => typeof tag !== 'string' || !tag.trim() || tag.trim().length > 32)) {
-    throw invalidRequest('标签必须是最多 20 个、每项不超过 32 个字符的非空字符串')
-  }
-  const tags = [...new Set(rawTags.map((tag) => (tag as string).trim()))]
+  const tagIds = optionalStringList(source, 'tagIds', '标签 ID', 20, 100)
+  const tags = optionalStringList(source, 'tags', '标签', 20, 32) ?? []
   const authorUrlValue = source.authorUrl
   let authorUrl: string | undefined
   if (authorUrlValue !== undefined && authorUrlValue !== null && authorUrlValue !== '') {
@@ -71,7 +83,7 @@ function parseCreateSkillBody(body: unknown): CreateMarketplaceAdminSkillInput {
     authorName: requiredString(source, 'authorName', '作者名称', 100),
     ...(authorUrl ? { authorUrl } : {}),
     categoryId: requiredString(source, 'categoryId', '分类', 100),
-    tags,
+    ...(tagIds ? { tagIds } : { tags }),
     icon: requiredString(source, 'icon', '图标', 200),
     featured: source.featured ?? false,
   }
@@ -97,14 +109,8 @@ function parseUpdateSkillBody(body: unknown): UpdateMarketplaceAdminSkillInput {
   if (identifier && !isMarketplaceIdentifier(identifier)) {
     throw invalidRequest('identifier 仅允许小写字母、数字和单个短横线，且必须以字母开头')
   }
-  let tags: string[] | undefined
-  if ('tags' in source) {
-    if (!Array.isArray(source.tags) || source.tags.length > 20
-      || source.tags.some((tag) => typeof tag !== 'string' || !tag.trim() || tag.trim().length > 32)) {
-      throw invalidRequest('标签必须是最多 20 个、每项不超过 32 个字符的非空字符串')
-    }
-    tags = [...new Set(source.tags.map((tag) => (tag as string).trim()))]
-  }
+  const tagIds = optionalStringList(source, 'tagIds', '标签 ID', 20, 100)
+  const tags = optionalStringList(source, 'tags', '标签', 20, 32)
   let authorUrl: string | null | undefined
   if ('authorUrl' in source) {
     if (source.authorUrl === null || source.authorUrl === '') {
@@ -139,6 +145,7 @@ function parseUpdateSkillBody(body: unknown): UpdateMarketplaceAdminSkillInput {
     ...(authorName ? { authorName } : {}),
     ...(authorUrl !== undefined ? { authorUrl } : {}),
     ...(categoryId ? { categoryId } : {}),
+    ...(tagIds ? { tagIds } : {}),
     ...(tags ? { tags } : {}),
     ...(icon ? { icon } : {}),
     ...(typeof source.featured === 'boolean' ? { featured: source.featured } : {}),

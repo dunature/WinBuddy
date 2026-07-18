@@ -307,6 +307,17 @@ export const MARKETPLACE_VERSION_STATUSES = [
 export type MarketplaceSkillStatus = typeof MARKETPLACE_SKILL_STATUSES[number]
 export type MarketplaceVersionStatus = typeof MARKETPLACE_VERSION_STATUSES[number]
 
+export interface MarketplaceNormalizedTaxonomyName {
+  name: string
+  normalizedName: string
+}
+
+export function normalizeMarketplaceTaxonomyName(value: string): MarketplaceNormalizedTaxonomyName {
+  const name = value.normalize('NFKC').trim().replace(/\s+/gu, ' ')
+  if (!name) throw new Error('TAXONOMY_NAME_REQUIRED')
+  return { name, normalizedName: name.toLowerCase() }
+}
+
 export type MarketplaceVersionGovernanceAction =
   | 'submit_review'
   | 'approve'

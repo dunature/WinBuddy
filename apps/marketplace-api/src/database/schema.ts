@@ -5,8 +5,11 @@ import type { MarketplaceSkillStatus, MarketplaceVersionStatus } from '@proma/ma
 export const categories = pgTable('categories', {
   id: text('id').primaryKey(),
   name: text('name').notNull().unique(),
+  normalizedName: text('normalized_name').notNull().unique(),
   icon: text('icon').notNull(),
+  revision: integer('revision').notNull().default(1),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const skills = pgTable('skills', {
@@ -17,7 +20,7 @@ export const skills = pgTable('skills', {
   description: text('description').notNull(),
   authorName: text('author_name').notNull(),
   authorUrl: text('author_url'),
-  categoryId: text('category_id').notNull().references(() => categories.id),
+  categoryId: text('category_id').references(() => categories.id, { onDelete: 'set null' }),
   tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   icon: text('icon').notNull(),
   featured: boolean('featured').notNull().default(false),
@@ -30,6 +33,20 @@ export const skills = pgTable('skills', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+export const tags = pgTable('tags', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  normalizedName: text('normalized_name').notNull().unique(),
+  revision: integer('revision').notNull().default(1),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const skillTags = pgTable('skill_tags', {
+  skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
+  tagId: text('tag_id').notNull().references(() => tags.id),
+}, (table) => [primaryKey({ columns: [table.skillId, table.tagId] })])
 
 export const skillVersions = pgTable('skill_versions', {
   id: text('id').primaryKey(),

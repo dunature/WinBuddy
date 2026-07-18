@@ -13,6 +13,7 @@ import type {
   MarketplaceSkillStatus,
   MarketplaceVersionStatus,
 } from '@proma/shared'
+import type { Sql, TransactionSql } from 'postgres'
 import type { AuthenticatedAdminSession } from './admin-auth'
 import type { MarketplaceDatabase } from './database/client'
 
@@ -35,7 +36,8 @@ export interface CreateMarketplaceAdminSkillInput {
   authorName: string
   authorUrl?: string
   categoryId: string
-  tags: string[]
+  tagIds?: string[]
+  tags?: string[]
   icon: string
   featured: boolean
 }
@@ -49,6 +51,7 @@ export interface UpdateMarketplaceAdminSkillInput {
   authorName?: string
   authorUrl?: string | null
   categoryId?: string
+  tagIds?: string[]
   tags?: string[]
   icon?: string
   featured?: boolean
@@ -79,6 +82,7 @@ interface SkillRow {
   author_name: string
   author_url: string | null
   category_id: string
+  tag_ids: string[]
   tags: string[]
   icon: string
   featured: boolean
@@ -120,6 +124,7 @@ function toAdminSkill(row: SkillRow): MarketplaceAdminSkillSummary {
     authorName: row.author_name,
     ...(row.author_url ? { authorUrl: row.author_url } : {}),
     categoryId: row.category_id,
+    tagIds: row.tag_ids,
     tags: row.tags,
     icon: row.icon,
     featured: row.featured,
@@ -160,13 +165,52 @@ function postgresErrorCode(error: unknown): string | undefined {
     : undefined
 }
 
+type MarketplaceSql = Sql | TransactionSql
+
+function skillSelectColumns(sql: MarketplaceSql) {
+  return sql`
+    skills.id, skills.identifier, skills.name, skills.tagline, skills.description,
+    skills.author_name, skills.author_url, skills.category_id,
+    COALESCE(ARRAY(
+      SELECT skill_tags.tag_id FROM skill_tags
+      INNER JOIN tags ON tags.id = skill_tags.tag_id
+      WHERE skill_tags.skill_id = skills.id
+      ORDER BY tags.normalized_name, tags.id
+    ), '{}'::text[]) AS tag_ids,
+    COALESCE(NULLIF(ARRAY(
+      SELECT tags.name FROM skill_tags
+      INNER JOIN tags ON tags.id = skill_tags.tag_id
+      WHERE skill_tags.skill_id = skills.id
+      ORDER BY tags.normalized_name, tags.id
+    ), '{}'::text[]), skills.tags) AS tags,
+    skills.icon, skills.featured, skills.status, skills.current_published_version_id,
+    skills.revision, skills.created_at, skills.updated_at
+  `
+}
+
+async function resolveTagBinding(
+  transaction: TransactionSql,
+  tagIds: string[],
+): Promise<{ ids: string[]; names: string[] }> {
+  const uniqueIds = [...new Set(tagIds)]
+  if (uniqueIds.length === 0) return { ids: [], names: [] }
+  const rows = await transaction<{ id: string; name: string }[]>`
+    SELECT id, name FROM tags WHERE id = ANY(${uniqueIds})
+    ORDER BY normalized_name, id
+    FOR SHARE
+  `
+  if (rows.length !== uniqueIds.length) {
+    throw new MarketplaceAdminDraftError('TAG_NOT_FOUND', '一个或多个标签不存在', 400)
+  }
+  return { ids: rows.map((row) => row.id), names: rows.map((row) => row.name) }
+}
+
 export async function getMarketplaceAdminSkill(
   database: MarketplaceDatabase,
   skillId: string,
 ): Promise<MarketplaceAdminSkillDetail | null> {
   const rows = await database.sql<SkillRow[]>`
-    SELECT id, identifier, name, tagline, description, author_name, author_url, category_id,
-      tags, icon, featured, status, current_published_version_id, revision, created_at, updated_at
+    SELECT ${skillSelectColumns(database.sql)}
     FROM skills
     WHERE id = ${skillId} AND deleted_at IS NULL
     LIMIT 1
@@ -214,8 +258,7 @@ export async function listMarketplaceAdminSkills(
   const pagination = normalizeMarketplacePagination(input)
   const [rows, totals] = await Promise.all([
     database.sql<SkillRow[]>`
-      SELECT id, identifier, name, tagline, description, author_name, author_url, category_id,
-        tags, icon, featured, status, current_published_version_id, revision, created_at, updated_at
+      SELECT ${skillSelectColumns(database.sql)}
       FROM skills
       WHERE deleted_at IS NULL
         AND (${input.status ?? null}::text IS NULL OR status = ${input.status ?? null})
@@ -249,16 +292,20 @@ export async function createMarketplaceAdminSkill(
   const initialState = createMarketplaceDraftSkillState()
   try {
     await database.sql.begin(async (transaction) => {
+      const tagBinding = input.tagIds ? await resolveTagBinding(transaction, input.tagIds) : null
       await transaction`
         INSERT INTO skills (
           id, identifier, name, tagline, description, author_name, author_url, category_id,
           tags, icon, featured, status, current_published_version_id
         ) VALUES (
           ${id}, ${input.identifier}, ${input.name}, ${input.tagline}, ${input.description},
-          ${input.authorName}, ${input.authorUrl ?? null}, ${input.categoryId}, ${input.tags},
+          ${input.authorName}, ${input.authorUrl ?? null}, ${input.categoryId}, ${tagBinding?.names ?? input.tags ?? []},
           ${input.icon}, ${input.featured}, ${initialState.status}, ${initialState.currentPublishedVersionId}
         )
       `
+      for (const tagId of tagBinding?.ids ?? []) {
+        await transaction`INSERT INTO skill_tags (skill_id, tag_id) VALUES (${id}, ${tagId})`
+      }
       await transaction`
         INSERT INTO audit_entries (
           id, actor_id, actor_identifier, action, request_id, after_state, reason
@@ -295,8 +342,7 @@ export async function updateMarketplaceAdminSkill(
   try {
     await database.sql.begin(async (transaction) => {
       const rows = await transaction<SkillRow[]>`
-        SELECT id, identifier, name, tagline, description, author_name, author_url, category_id,
-          tags, icon, featured, status, current_published_version_id, revision, created_at, updated_at
+        SELECT ${skillSelectColumns(transaction)}
         FROM skills
         WHERE id = ${skillId} AND deleted_at IS NULL
         FOR UPDATE
@@ -309,6 +355,7 @@ export async function updateMarketplaceAdminSkill(
       if (current.revision !== input.revision) {
         throw new MarketplaceAdminDraftError('SKILL_REVISION_CONFLICT', 'Skill 已被其他操作更新，请刷新后重试', 409)
       }
+      const tagBinding = input.tagIds ? await resolveTagBinding(transaction, input.tagIds) : null
 
       await transaction`
         UPDATE skills SET
@@ -319,13 +366,23 @@ export async function updateMarketplaceAdminSkill(
           author_name = COALESCE(${input.authorName ?? null}, author_name),
           author_url = CASE WHEN ${input.authorUrl !== undefined} THEN ${input.authorUrl ?? null} ELSE author_url END,
           category_id = COALESCE(${input.categoryId ?? null}, category_id),
-          tags = CASE WHEN ${input.tags !== undefined} THEN ${input.tags ?? []} ELSE tags END,
+          tags = CASE
+            WHEN ${tagBinding !== null} THEN ${tagBinding?.names ?? []}
+            WHEN ${input.tags !== undefined} THEN ${input.tags ?? []}
+            ELSE tags
+          END,
           icon = COALESCE(${input.icon ?? null}, icon),
           featured = CASE WHEN ${input.featured !== undefined} THEN ${input.featured ?? false} ELSE featured END,
           revision = revision + 1,
           updated_at = now()
         WHERE id = ${skillId}
       `
+      if (tagBinding) {
+        await transaction`DELETE FROM skill_tags WHERE skill_id = ${skillId}`
+        for (const tagId of tagBinding.ids) {
+          await transaction`INSERT INTO skill_tags (skill_id, tag_id) VALUES (${skillId}, ${tagId})`
+        }
+      }
       const afterState = {
         identifier: input.identifier ?? current.identifier,
         name: input.name ?? current.name,

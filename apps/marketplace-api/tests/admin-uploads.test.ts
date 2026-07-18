@@ -95,7 +95,10 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 包上传与校验 API（真实 
       initialPassword: 'initial-password-123',
       requestId: 'uploads-bootstrap',
     })
-    await database.sql`INSERT INTO categories (id, name, icon) VALUES ('automation', '效率自动化', 'workflow')`
+    await database.sql`
+      INSERT INTO categories (id, name, normalized_name, icon)
+      VALUES ('automation', '效率自动化', '效率自动化', 'workflow')
+    `
     app = createMarketplaceApp({ database, allowedOrigin, storageDir })
 
     const challengeResponse = await app.request('/api/v1/admin/auth/login-challenge')

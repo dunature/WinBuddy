@@ -5,11 +5,33 @@ export interface MarketplaceCategory {
   icon: string
 }
 
+export interface MarketplaceTag {
+  id: string
+  name: string
+}
+
+export interface MarketplaceAdminCategory extends MarketplaceCategory {
+  normalizedName: string
+  revision: number
+  referenceCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MarketplaceAdminTag extends MarketplaceTag {
+  normalizedName: string
+  revision: number
+  referenceCount: number
+  createdAt: string
+  updatedAt: string
+}
+
 export type MarketplaceSort = 'hot' | 'latest'
 
 export interface MarketplaceListQuery {
   query?: string
   category?: string
+  tag?: string
   featured?: boolean
   sort: MarketplaceSort
   page: number
@@ -219,6 +241,7 @@ export interface MarketplaceAdminSkillSummary {
   authorName: string
   authorUrl?: string
   categoryId: string
+  tagIds: string[]
   tags: string[]
   icon: string
   featured: boolean

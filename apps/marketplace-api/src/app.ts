@@ -8,6 +8,7 @@ import type { MarketplaceDatabase } from './database/client'
 import { createMarketplaceAdminDraftRouter } from './admin-draft-routes'
 import { createMarketplaceAdminPublishRouter } from './admin-publish-routes'
 import { createMarketplaceAdminUploadRouter } from './admin-upload-routes'
+import { createMarketplaceAdminTaxonomyRouter } from './admin-taxonomy-routes'
 import {
   ADMIN_CSRF_COOKIE,
   ADMIN_LOGIN_CSRF_COOKIE,
@@ -307,6 +308,7 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
   })
 
   app.route('/api/v1/admin', createMarketplaceAdminDraftRouter(options.database))
+  app.route('/api/v1/admin', createMarketplaceAdminTaxonomyRouter(options.database))
   if (options.storageDir) {
     app.route('/api/v1/admin', createMarketplaceAdminUploadRouter(options.database, options.storageDir))
     app.route('/api/v1/admin', createMarketplaceAdminPublishRouter(options.database, options.storageDir))
@@ -321,6 +323,7 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
     const result = await listPublicSkills(options.database, {
       query: context.req.query('q'),
       category: context.req.query('category'),
+      tag: context.req.query('tag'),
       featured: context.req.query('featured') === '1',
       sort: context.req.query('sort') === 'latest' ? 'latest' : 'hot',
       page: Number.parseInt(context.req.query('page') ?? '', 10),

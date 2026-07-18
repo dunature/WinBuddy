@@ -30,8 +30,10 @@ function responseRequestId(response: Response): string {
 
 async function seedPublicCatalog(sql: Sql): Promise<void> {
   await sql`
-    INSERT INTO categories (id, name, icon)
-    VALUES ('research', '研究分析', 'search'), ('docs', '文档创作', 'file-text')
+    INSERT INTO categories (id, name, normalized_name, icon)
+    VALUES
+      ('research', '研究分析', '研究分析', 'search'),
+      ('docs', '文档创作', '文档创作', 'file-text')
   `
   await sql`
     INSERT INTO skills (

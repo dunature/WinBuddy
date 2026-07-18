@@ -17,6 +17,7 @@ export class MarketplaceRequestError extends Error {
     message: string,
     readonly code: string,
     readonly status: number,
+    readonly details?: unknown,
   ) {
     super(message)
     this.name = 'MarketplaceRequestError'
@@ -62,6 +63,7 @@ export async function requestMarketplaceEnvelope(
       failure.error?.message || '技能市场请求失败',
       failure.error?.code || 'REQUEST_FAILED',
       response.status,
+      failure.error?.details,
     )
   }
   return payload
@@ -87,6 +89,7 @@ export async function listMarketplaceSkills(
   })
   if (query.query) search.set('q', query.query)
   if (query.category) search.set('category', query.category)
+  if (query.tag) search.set('tag', query.tag)
   if (query.featured) search.set('featured', '1')
   const envelope = await requestMarketplaceEnvelope(`/marketplace/skills?${search}`, { signal }) as unknown as MarketplaceApiPage<MarketplaceSkillSummary>
   return { items: envelope.data, page: envelope.page }

@@ -1,11 +1,13 @@
 import type {
   MarketplaceAdminIdentity,
+  MarketplaceAdminCategory,
   MarketplaceAdminSession,
   MarketplaceAdminSkillDetail,
   MarketplaceAdminSkillSummary,
   MarketplaceAdminUpload,
   MarketplaceAdminVersion,
   MarketplaceAdminVersionActionResult,
+  MarketplaceAdminTag,
   MarketplaceVersionGovernanceAction,
   MarketplaceApiPage,
   MarketplaceApiSuccess,
@@ -69,9 +71,81 @@ export interface AdminSkillWriteInput {
   authorName: string
   authorUrl?: string
   categoryId: string
-  tags: string[]
+  tagIds: string[]
   icon: string
   featured: boolean
+}
+
+export async function listAdminCategories(): Promise<MarketplaceAdminCategory[]> {
+  return adminRequest('/admin/categories')
+}
+
+export async function listAdminTags(): Promise<MarketplaceAdminTag[]> {
+  return adminRequest('/admin/tags')
+}
+
+export async function createAdminCategory(
+  input: { name: string; icon: string },
+  csrfToken: string,
+): Promise<MarketplaceAdminCategory> {
+  return adminRequest('/admin/categories', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(input),
+  })
+}
+
+export async function updateAdminCategory(
+  categoryId: string,
+  input: { revision: number; name: string; icon: string },
+  csrfToken: string,
+): Promise<MarketplaceAdminCategory> {
+  return adminRequest(`/admin/categories/${encodeURIComponent(categoryId)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(input),
+  })
+}
+
+export async function deleteAdminCategory(
+  categoryId: string,
+  revision: number,
+  csrfToken: string,
+): Promise<void> {
+  await adminRequest(`/admin/categories/${encodeURIComponent(categoryId)}`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify({ revision }),
+  })
+}
+
+export async function createAdminTag(name: string, csrfToken: string): Promise<MarketplaceAdminTag> {
+  return adminRequest('/admin/tags', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify({ name }),
+  })
+}
+
+export async function updateAdminTag(
+  tagId: string,
+  revision: number,
+  name: string,
+  csrfToken: string,
+): Promise<MarketplaceAdminTag> {
+  return adminRequest(`/admin/tags/${encodeURIComponent(tagId)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify({ revision, name }),
+  })
+}
+
+export async function deleteAdminTag(tagId: string, revision: number, csrfToken: string): Promise<void> {
+  await adminRequest(`/admin/tags/${encodeURIComponent(tagId)}`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify({ revision }),
+  })
 }
 
 export async function listAdminSkills(): Promise<MarketplacePage<MarketplaceAdminSkillSummary>> {

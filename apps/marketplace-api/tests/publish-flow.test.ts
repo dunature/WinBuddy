@@ -151,7 +151,10 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 审核发布黄金路径（真�
       initialPassword: 'initial-password-123',
       requestId: 'publish-bootstrap',
     })
-    await database.sql`INSERT INTO categories (id, name, icon) VALUES ('automation', '效率自动化', 'workflow')`
+    await database.sql`
+      INSERT INTO categories (id, name, normalized_name, icon)
+      VALUES ('automation', '效率自动化', '效率自动化', 'workflow')
+    `
     app = createMarketplaceApp({
       database,
       allowedOrigin,
