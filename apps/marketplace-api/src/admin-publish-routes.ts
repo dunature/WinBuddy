@@ -1,10 +1,28 @@
 import { Hono } from 'hono'
-import type { MarketplaceGoldenPathAction } from '@proma/marketplace-domain'
+import type { MarketplaceVersionGovernanceAction } from '@proma/marketplace-domain'
 import { MarketplaceAdminPublishError, performMarketplaceVersionAction } from './admin-publish'
 import type { MarketplaceAppEnv } from './app'
 import type { MarketplaceDatabase } from './database/client'
 
-const goldenPathActions = new Set<MarketplaceGoldenPathAction>(['submit_review', 'approve', 'publish'])
+const governanceActions = new Set<MarketplaceVersionGovernanceAction>([
+  'submit_review',
+  'approve',
+  'reject',
+  'return_to_edit',
+  'withdraw',
+  'publish',
+  'unpublish',
+  'republish',
+  'archive',
+])
+
+const reasonRequiredActions = new Set<MarketplaceVersionGovernanceAction>([
+  'reject',
+  'return_to_edit',
+  'withdraw',
+  'unpublish',
+  'archive',
+])
 
 async function actionReason(request: Request): Promise<string> {
   let body: unknown
@@ -24,6 +42,14 @@ async function actionReason(request: Request): Promise<string> {
   return reason.trim()
 }
 
+function idempotencyKey(request: Request): string {
+  const value = request.headers.get('idempotency-key')?.trim() ?? ''
+  if (!/^[A-Za-z0-9._:-]{8,128}$/.test(value)) {
+    throw new MarketplaceAdminPublishError('IDEMPOTENCY_KEY_REQUIRED', '请提供 8 到 128 个字符的有效幂等键', 400)
+  }
+  return value
+}
+
 export function createMarketplaceAdminPublishRouter(
   database: MarketplaceDatabase,
   storageDir: string,
@@ -31,9 +57,13 @@ export function createMarketplaceAdminPublishRouter(
   const router = new Hono<MarketplaceAppEnv>()
   router.post('/skills/:skillId/versions/:versionId/actions/:action', async (context) => {
     try {
-      const action = context.req.param('action') as MarketplaceGoldenPathAction
-      if (!goldenPathActions.has(action)) {
+      const action = context.req.param('action') as MarketplaceVersionGovernanceAction
+      if (!governanceActions.has(action)) {
         throw new MarketplaceAdminPublishError('VERSION_ACTION_UNKNOWN', '未知的版本动作', 400)
+      }
+      const reason = await actionReason(context.req.raw)
+      if (reasonRequiredActions.has(action) && !reason) {
+        throw new MarketplaceAdminPublishError('ACTION_REASON_REQUIRED', '该版本动作必须填写原因', 400)
       }
       const result = await performMarketplaceVersionAction(
         database,
@@ -44,7 +74,8 @@ export function createMarketplaceAdminPublishRouter(
         {
           actor: context.get('adminSession'),
           requestId: context.get('requestId'),
-          reason: await actionReason(context.req.raw),
+          reason,
+          idempotencyKey: idempotencyKey(context.req.raw),
         },
       )
       return context.json({ data: result, requestId: context.get('requestId') })

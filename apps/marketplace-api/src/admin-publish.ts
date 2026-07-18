@@ -3,10 +3,10 @@ import { access, copyFile, mkdir, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { Sql, TransactionSql } from 'postgres'
 import {
-  MarketplaceGoldenPathError,
-  applyMarketplaceGoldenPathAction,
-  type MarketplaceGoldenPathAction,
+  MarketplaceVersionGovernanceError,
+  applyMarketplaceVersionGovernanceAction,
   type MarketplaceSkillStatus,
+  type MarketplaceVersionGovernanceAction,
   type MarketplaceVersionStatus,
 } from '@proma/marketplace-domain'
 import type { MarketplaceAdminVersionActionResult } from '@proma/shared'
@@ -34,6 +34,7 @@ export interface MarketplaceAdminPublishContext {
   actor: AuthenticatedAdminSession
   requestId: string
   reason: string
+  idempotencyKey: string
 }
 
 interface PublishStateRow {
@@ -56,13 +57,28 @@ interface ValidatedUploadRow {
 
 type MarketplaceSql = Sql | TransactionSql
 
-function actionLabel(action: MarketplaceGoldenPathAction): string {
-  if (action === 'submit_review') return '提交审核'
-  if (action === 'approve') return '批准版本'
-  return '发布版本'
+function postgresErrorCode(error: unknown): string | undefined {
+  return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : undefined
 }
 
-function mapGoldenPathError(error: MarketplaceGoldenPathError): MarketplaceAdminPublishError {
+function actionLabel(action: MarketplaceVersionGovernanceAction): string {
+  const labels: Record<MarketplaceVersionGovernanceAction, string> = {
+    submit_review: '提交审核',
+    approve: '批准版本',
+    reject: '驳回版本',
+    return_to_edit: '返回编辑',
+    withdraw: '撤回审核',
+    publish: '发布版本',
+    unpublish: '下架版本',
+    republish: '重新发布',
+    archive: '归档版本',
+  }
+  return labels[action]
+}
+
+function mapGovernanceError(error: MarketplaceVersionGovernanceError): MarketplaceAdminPublishError {
   if (error.code === 'MARKETPLACE_PUBLISHED_POINTER_MISMATCH') {
     return new MarketplaceAdminPublishError('PUBLISHED_POINTER_MISMATCH', '已发布版本与线上指针不一致', 409)
   }
@@ -89,9 +105,9 @@ async function readPublishState(
   return rows[0] ?? null
 }
 
-function transition(row: PublishStateRow, action: MarketplaceGoldenPathAction) {
+function transition(row: PublishStateRow, action: MarketplaceVersionGovernanceAction) {
   try {
-    return applyMarketplaceGoldenPathAction({
+    return applyMarketplaceVersionGovernanceAction({
       action,
       versionId: row.version_id,
       versionStatus: row.version_status,
@@ -99,7 +115,7 @@ function transition(row: PublishStateRow, action: MarketplaceGoldenPathAction) {
       currentPublishedVersionId: row.current_published_version_id,
     })
   } catch (error) {
-    if (error instanceof MarketplaceGoldenPathError) throw mapGoldenPathError(error)
+    if (error instanceof MarketplaceVersionGovernanceError) throw mapGovernanceError(error)
     throw error
   }
 }
@@ -119,34 +135,74 @@ function auditState(row: PublishStateRow, changed: boolean, status = row.version
 async function insertActionAudit(
   sql: MarketplaceSql,
   row: PublishStateRow,
-  action: MarketplaceGoldenPathAction,
+  action: MarketplaceVersionGovernanceAction,
   after: ReturnType<typeof transition>,
   context: MarketplaceAdminPublishContext,
 ): Promise<void> {
+  const beforeState = auditState(row, false)
+  const skillChanged = after.skillStatus !== row.skill_status
+    || after.currentPublishedVersionId !== row.current_published_version_id
+  const afterState = {
+    ...auditState(row, after.changed, after.versionStatus),
+    skillStatus: after.skillStatus,
+    currentPublishedVersionId: after.currentPublishedVersionId,
+    versionRevision: row.version_revision + (after.changed ? 1 : 0),
+    skillRevision: row.skill_revision + (after.changed && skillChanged ? 1 : 0),
+  }
   await sql`
     INSERT INTO audit_entries (
       id, actor_id, actor_identifier, action, request_id, before_state, after_state, reason
     ) VALUES (
       ${randomUUID()}, ${context.actor.adminId}, ${context.actor.username},
       ${`skill_version.${action}`}, ${context.requestId},
-      ${JSON.stringify(auditState(row, false))}::jsonb,
-      ${JSON.stringify({
-        ...auditState(row, after.changed, after.versionStatus),
-        skillStatus: after.skillStatus,
-        currentPublishedVersionId: after.currentPublishedVersionId,
-        versionRevision: row.version_revision + (after.changed ? 1 : 0),
-        skillRevision: row.skill_revision + (after.changed && action === 'publish' ? 1 : 0),
-      })}::jsonb,
+      ${JSON.stringify(beforeState)}::jsonb,
+      ${JSON.stringify(afterState)}::jsonb,
       ${context.reason || `${actionLabel(action)}${after.changed ? '' : '（幂等重试）'}`}
     )
   `
+  try {
+    await sql`
+      INSERT INTO review_records (
+        id, skill_id, version_id, actor_id, action, idempotency_key, request_id,
+        reason, before_state, after_state
+      ) VALUES (
+        ${randomUUID()}, ${row.skill_id}, ${row.version_id}, ${context.actor.adminId},
+        ${action}, ${context.idempotencyKey}, ${context.requestId},
+        ${context.reason || null}, ${JSON.stringify(beforeState)}::jsonb, ${JSON.stringify(afterState)}::jsonb
+      )
+    `
+  } catch (error) {
+    if (postgresErrorCode(error) === '23505') {
+      throw new MarketplaceAdminPublishError('IDEMPOTENCY_KEY_REUSED', '幂等键已用于其他版本动作', 409)
+    }
+    throw error
+  }
+}
+
+async function isIdempotentReplay(
+  sql: MarketplaceSql,
+  row: PublishStateRow,
+  action: MarketplaceVersionGovernanceAction,
+  context: MarketplaceAdminPublishContext,
+): Promise<boolean> {
+  const records = await sql<{ skill_id: string; version_id: string; action: string }[]>`
+    SELECT skill_id, version_id, action FROM review_records
+    WHERE idempotency_key = ${context.idempotencyKey}
+    LIMIT 1
+  `
+  const record = records[0]
+  if (!record) return false
+  if (record.skill_id !== row.skill_id || record.version_id !== row.version_id || record.action !== action) {
+    throw new MarketplaceAdminPublishError('IDEMPOTENCY_KEY_REUSED', '幂等键已用于其他版本动作', 409)
+  }
+  return true
 }
 
 async function actionResult(
   database: MarketplaceDatabase,
   skillId: string,
   versionId: string,
-  action: MarketplaceGoldenPathAction,
+  action: MarketplaceVersionGovernanceAction,
   changed: boolean,
 ): Promise<MarketplaceAdminVersionActionResult> {
   const skill = await getMarketplaceAdminSkill(database, skillId)
@@ -155,16 +211,18 @@ async function actionResult(
   return { action, changed, skill, version }
 }
 
-async function performReviewAction(
+async function performStateAction(
   database: MarketplaceDatabase,
+  storageDir: string,
   skillId: string,
   versionId: string,
-  action: 'submit_review' | 'approve',
+  action: Exclude<MarketplaceVersionGovernanceAction, 'publish'>,
   context: MarketplaceAdminPublishContext,
 ): Promise<MarketplaceAdminVersionActionResult> {
   const changed = await database.sql.begin(async (transaction) => {
     const row = await readPublishState(transaction, skillId, versionId, true)
     if (!row) throw new MarketplaceAdminPublishError('VERSION_NOT_FOUND', '候选版本不存在', 404)
+    if (await isIdempotentReplay(transaction, row, action, context)) return false
     const after = transition(row, action)
     if (action === 'submit_review' && after.changed) {
       const uploads = await transaction<{ id: string }[]>`
@@ -179,11 +237,28 @@ async function performReviewAction(
         throw new MarketplaceAdminPublishError('VERSION_VALIDATION_REQUIRED', '请先上传并通过 Skill 包校验', 409)
       }
     }
+    if (action === 'republish' && after.changed) {
+      const packagePath = join(storageDir, 'published', row.identifier, row.version, 'package.zip')
+      if (!await pathExists(packagePath)) {
+        throw new MarketplaceAdminPublishError('PUBLISHED_PACKAGE_NOT_FOUND', '已发布包不存在，无法重新发布', 409)
+      }
+    }
     if (after.changed) {
       await transaction`
         UPDATE skill_versions SET status = ${after.versionStatus}, revision = revision + 1, updated_at = now()
         WHERE id = ${versionId}
       `
+      if (
+        after.skillStatus !== row.skill_status
+        || after.currentPublishedVersionId !== row.current_published_version_id
+      ) {
+        await transaction`
+          UPDATE skills SET status = ${after.skillStatus},
+            current_published_version_id = ${after.currentPublishedVersionId},
+            revision = revision + 1, updated_at = now()
+          WHERE id = ${skillId}
+        `
+      }
     }
     await insertActionAudit(transaction, row, action, after, context)
     return after.changed
@@ -225,11 +300,15 @@ async function performPublishAction(
 ): Promise<MarketplaceAdminVersionActionResult> {
   const initial = await readPublishState(database.sql, skillId, versionId)
   if (!initial) throw new MarketplaceAdminPublishError('VERSION_NOT_FOUND', '候选版本不存在', 404)
+  if (await isIdempotentReplay(database.sql, initial, 'publish', context)) {
+    return actionResult(database, skillId, versionId, 'publish', false)
+  }
   const initialTransition = transition(initial, 'publish')
   if (!initialTransition.changed) {
     const changed = await database.sql.begin(async (transaction) => {
       const current = await readPublishState(transaction, skillId, versionId, true)
       if (!current) throw new MarketplaceAdminPublishError('VERSION_NOT_FOUND', '候选版本不存在', 404)
+      if (await isIdempotentReplay(transaction, current, 'publish', context)) return false
       const after = transition(current, 'publish')
       await insertActionAudit(transaction, current, 'publish', after, context)
       return after.changed
@@ -267,6 +346,7 @@ async function performPublishAction(
     changed = await database.sql.begin(async (transaction) => {
       const row = await readPublishState(transaction, skillId, versionId, true)
       if (!row) throw new MarketplaceAdminPublishError('VERSION_NOT_FOUND', '候选版本不存在', 404)
+      if (await isIdempotentReplay(transaction, row, 'publish', context)) return false
       const after = transition(row, 'publish')
       if (!after.changed) {
         await insertActionAudit(transaction, row, 'publish', after, context)
@@ -325,11 +405,11 @@ export async function performMarketplaceVersionAction(
   storageDir: string,
   skillId: string,
   versionId: string,
-  action: MarketplaceGoldenPathAction,
+  action: MarketplaceVersionGovernanceAction,
   context: MarketplaceAdminPublishContext,
 ): Promise<MarketplaceAdminVersionActionResult> {
   if (action === 'publish') {
     return performPublishAction(database, storageDir, skillId, versionId, context)
   }
-  return performReviewAction(database, skillId, versionId, action, context)
+  return performStateAction(database, storageDir, skillId, versionId, action, context)
 }

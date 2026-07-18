@@ -11,6 +11,7 @@ import type {
   MarketplaceApiError,
   MarketplaceApiSuccess,
   MarketplaceInstallManifest,
+  MarketplaceVersionGovernanceAction,
 } from '@proma/shared'
 import { initializeMarketplaceAdmin } from '../src/admin-auth'
 import { createMarketplaceApp } from '../src/app'
@@ -41,6 +42,7 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 审核发布黄金路径（真�
   let storageDir = ''
   let sessionCookie = ''
   let csrfToken = ''
+  let idempotencySequence = 0
 
   const adminHeaders = (): Record<string, string> => ({
     'content-type': 'application/json',
@@ -122,11 +124,19 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 审核发布黄金路径（真�
   async function action(
     skillId: string,
     versionId: string,
-    name: 'submit_review' | 'approve' | 'publish',
+    name: MarketplaceVersionGovernanceAction,
+    options: { reason?: string; idempotencyKey?: string } = {},
   ): Promise<{ response: Response; body: MarketplaceApiSuccess<MarketplaceAdminVersionActionResult> }> {
     const response = await app.request(
       `/api/v1/admin/skills/${skillId}/versions/${versionId}/actions/${name}`,
-      { method: 'POST', headers: adminHeaders(), body: JSON.stringify({ reason: `测试动作 ${name}` }) },
+      {
+        method: 'POST',
+        headers: {
+          ...adminHeaders(),
+          'idempotency-key': options.idempotencyKey ?? `publish-test-${idempotencySequence += 1}`,
+        },
+        body: JSON.stringify({ reason: options.reason ?? `测试动作 ${name}` }),
+      },
     )
     return { response, body: await readJson<MarketplaceApiSuccess<MarketplaceAdminVersionActionResult>>(response) }
   }
@@ -279,6 +289,24 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 审核发布黄金路径（真�
       { id: first.versionId, status: 'unpublished' },
       { id: candidate.versionId, status: 'published' },
     ])
+    const publishAudits = await database.sql<{
+      before_state: { skillRevision: number }
+      after_state: { skillRevision: number }
+    }[]>`
+      SELECT before_state, after_state FROM audit_entries
+      WHERE action = 'skill_version.publish' AND after_state->>'versionId' = ${candidate.versionId}
+      ORDER BY created_at DESC LIMIT 1
+    `
+    expect(publishAudits[0]?.after_state.skillRevision)
+      .toBe((publishAudits[0]?.before_state.skillRevision ?? 0) + 1)
+    const historical = published.body.data.skill.versions.find((version) => version.id === first.versionId)
+    expect(historical).toMatchObject({ allowedActions: ['archive'], nextAction: 'archive' })
+
+    const archived = await action(first.skillId, first.versionId, 'archive', { reason: '归档历史版本' })
+    expect(archived.body.data).toMatchObject({
+      version: { status: 'archived' },
+      skill: { status: 'published', currentPublishedVersionId: candidate.versionId },
+    })
   })
 
   test('Given 数据库在发布事务中失败 When 发布 Then 保留旧指针并清理半发布目录', async () => {
@@ -302,7 +330,11 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 审核发布黄金路径（真�
     try {
       const response = await app.request(
         `/api/v1/admin/skills/${candidate.skillId}/versions/${candidate.versionId}/actions/publish`,
-        { method: 'POST', headers: adminHeaders(), body: JSON.stringify({ reason: '注入失败' }) },
+        {
+          method: 'POST',
+          headers: { ...adminHeaders(), 'idempotency-key': 'publish-injected-failure' },
+          body: JSON.stringify({ reason: '注入失败' }),
+        },
       )
       expect(response.status).toBe(500)
       const rows = await database.sql<{ status: string; current_published_version_id: string | null }[]>`
@@ -327,7 +359,11 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 审核发布黄金路径（真�
 
     const response = await app.request(
       `/api/v1/admin/skills/${candidate.skillId}/versions/${candidate.versionId}/actions/publish`,
-      { method: 'POST', headers: adminHeaders(), body: JSON.stringify({ reason: '文件系统冲突' }) },
+      {
+        method: 'POST',
+        headers: { ...adminHeaders(), 'idempotency-key': 'publish-filesystem-conflict' },
+        body: JSON.stringify({ reason: '文件系统冲突' }),
+      },
     )
     expect(response.status).toBe(409)
     expect((await readJson<MarketplaceApiError>(response)).error.code).toBe('PUBLISHED_PACKAGE_CONFLICT')
@@ -339,5 +375,137 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 审核发布黄金路径（真�
     expect(rows[0]).toEqual({ status: 'approved', current_published_version_id: null })
     expect(await readFile(join(finalDirectory, 'sentinel.txt'), 'utf8')).toBe('保留现有目录')
     expect(await readdir(join(storageDir, 'published', '.staging'))).toEqual([])
+  })
+
+  test('Given 候选版本审核分支 When 驳回、返回编辑和撤回 Then 服务端决策驱动且旧线上指针不变', async () => {
+    const current = await createCandidate('review-branches', '1.0.0')
+    await action(current.skillId, current.versionId, 'submit_review')
+    await action(current.skillId, current.versionId, 'approve')
+    await action(current.skillId, current.versionId, 'publish')
+    const candidate = await createVersionCandidate(current.skillId, 'review-branches', '1.1.0')
+
+    await action(candidate.skillId, candidate.versionId, 'submit_review')
+    const rejected = await action(candidate.skillId, candidate.versionId, 'reject', { reason: '缺少变更说明' })
+    expect(rejected.body.data).toMatchObject({
+      version: { status: 'rejected', allowedActions: ['reupload', 'return_to_edit', 'archive'], nextAction: 'return_to_edit' },
+      skill: { currentPublishedVersionId: current.versionId },
+    })
+
+    const returned = await action(candidate.skillId, candidate.versionId, 'return_to_edit', { reason: '按意见修订' })
+    expect(returned.body.data).toMatchObject({
+      version: { status: 'created', nextAction: 'submit_review' },
+      skill: { currentPublishedVersionId: current.versionId },
+    })
+
+    await action(candidate.skillId, candidate.versionId, 'submit_review')
+    await action(candidate.skillId, candidate.versionId, 'approve')
+    const withdrawn = await action(candidate.skillId, candidate.versionId, 'withdraw', { reason: '发布前主动撤回' })
+    expect(withdrawn.body.data).toMatchObject({
+      version: { status: 'created', nextAction: 'submit_review' },
+      skill: { currentPublishedVersionId: current.versionId },
+    })
+  })
+
+  test('Given 当前线上版本 When 下架、重新发布并归档 Then 公开可见性与指针保持事务一致', async () => {
+    const current = await createCandidate('release-governance', '1.0.0')
+    await action(current.skillId, current.versionId, 'submit_review')
+    await action(current.skillId, current.versionId, 'approve')
+    await action(current.skillId, current.versionId, 'publish')
+
+    const unpublished = await action(current.skillId, current.versionId, 'unpublish', { reason: '临时下架整改' })
+    expect(unpublished.body.data).toMatchObject({
+      version: { status: 'unpublished', allowedActions: ['republish', 'archive'], nextAction: 'republish' },
+      skill: { status: 'unpublished', currentPublishedVersionId: null },
+    })
+    expect((await app.request('/api/v1/marketplace/skills/release-governance')).status).toBe(404)
+
+    const republished = await action(current.skillId, current.versionId, 'republish')
+    expect(republished.body.data).toMatchObject({
+      version: { status: 'published', nextAction: 'unpublish' },
+      skill: { status: 'published', currentPublishedVersionId: current.versionId },
+    })
+    expect((await app.request('/api/v1/marketplace/skills/release-governance')).status).toBe(200)
+
+    await action(current.skillId, current.versionId, 'unpublish', { reason: '永久下架' })
+    const archived = await action(current.skillId, current.versionId, 'archive', { reason: '结束维护' })
+    expect(archived.body.data).toMatchObject({
+      version: { status: 'archived', allowedActions: [], nextAction: null },
+      skill: { status: 'archived', currentPublishedVersionId: null },
+    })
+    const createAfterArchive = await app.request(`/api/v1/admin/skills/${current.skillId}/versions`, {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify({ version: '1.1.0', changelog: '不应创建' }),
+    })
+    expect(createAfterArchive.status).toBe(409)
+    expect((await readJson<MarketplaceApiError>(createAfterArchive)).error.code)
+      .toBe('SKILL_VERSION_CREATION_NOT_ALLOWED')
+  })
+
+  test('Given 治理写请求 When 缺少原因、幂等键或复用其他动作键 Then 返回稳定错误且同键重试不重复写记录', async () => {
+    const candidate = await createCandidate('governance-guards', '1.0.0')
+    const missingKey = await app.request(
+      `/api/v1/admin/skills/${candidate.skillId}/versions/${candidate.versionId}/actions/submit_review`,
+      { method: 'POST', headers: adminHeaders(), body: '{}' },
+    )
+    expect(missingKey.status).toBe(400)
+    expect((await readJson<MarketplaceApiError>(missingKey)).error.code).toBe('IDEMPOTENCY_KEY_REQUIRED')
+
+    const illegal = await app.request(
+      `/api/v1/admin/skills/${candidate.skillId}/versions/${candidate.versionId}/actions/approve`,
+      {
+        method: 'POST',
+        headers: { ...adminHeaders(), 'idempotency-key': 'governance-illegal-approve' },
+        body: '{}',
+      },
+    )
+    expect(illegal.status).toBe(409)
+    expect((await readJson<MarketplaceApiError>(illegal)).error.code).toBe('VERSION_ACTION_NOT_ALLOWED')
+
+    const key = 'governance-guard-submit'
+    const submitted = await action(candidate.skillId, candidate.versionId, 'submit_review', { idempotencyKey: key })
+    const replay = await action(candidate.skillId, candidate.versionId, 'submit_review', { idempotencyKey: key })
+    expect(submitted.body.data.changed).toBe(true)
+    expect(replay.body.data.changed).toBe(false)
+
+    const noReason = await app.request(
+      `/api/v1/admin/skills/${candidate.skillId}/versions/${candidate.versionId}/actions/reject`,
+      {
+        method: 'POST',
+        headers: { ...adminHeaders(), 'idempotency-key': 'governance-reject-no-reason' },
+        body: '{}',
+      },
+    )
+    expect(noReason.status).toBe(400)
+    expect((await readJson<MarketplaceApiError>(noReason)).error.code).toBe('ACTION_REASON_REQUIRED')
+
+    const reused = await app.request(
+      `/api/v1/admin/skills/${candidate.skillId}/versions/${candidate.versionId}/actions/approve`,
+      {
+        method: 'POST',
+        headers: { ...adminHeaders(), 'idempotency-key': key },
+        body: '{}',
+      },
+    )
+    expect(reused.status).toBe(409)
+    expect((await readJson<MarketplaceApiError>(reused)).error.code).toBe('IDEMPOTENCY_KEY_REUSED')
+    const records = await database.sql<{ count: number }[]>`
+      SELECT COUNT(*)::integer AS count FROM review_records WHERE idempotency_key = ${key}
+    `
+    expect(records[0]?.count).toBe(1)
+  })
+
+  test('Given 两个并发批准请求 When 竞争同一版本锁 Then 一次转换一次幂等完成且指针不变', async () => {
+    const candidate = await createCandidate('concurrent-review', '1.0.0')
+    await action(candidate.skillId, candidate.versionId, 'submit_review')
+
+    const results = await Promise.all([
+      action(candidate.skillId, candidate.versionId, 'approve', { idempotencyKey: 'concurrent-approve-one' }),
+      action(candidate.skillId, candidate.versionId, 'approve', { idempotencyKey: 'concurrent-approve-two' }),
+    ])
+
+    expect(results.map((result) => result.body.data.changed).sort()).toEqual([false, true])
+    expect(results.every((result) => result.body.data.version.status === 'approved'
+      && result.body.data.skill.currentPublishedVersionId === null)).toBe(true)
   })
 })
