@@ -121,53 +121,10 @@ afterEach(() => {
 
 describe('Marketplace 安装 HTTP 集成', () => {
   test('Given 临时 HOME 与测试 API When 按市场 ID 安装 Then 经真实 manifest 和下载路由原子写入工作区', async () => {
-    temporaryHome = createTemporaryHome()
+    const home = createTemporaryHome()
     const archive = createSkillArchive()
-    const requestedPaths: string[] = []
-    server = Bun.serve({
-      port: 0,
-      fetch(request) {
-        const url = new URL(request.url)
-        requestedPaths.push(url.pathname)
-        if (url.pathname === '/api/v1/marketplace/skills/by-id/skill-public/versions/1.2.0/manifest') {
-          const manifest: MarketplaceInstallManifest = {
-            marketplaceSkillId: 'skill-public',
-            identifier: 'deep-research',
-            version: '1.2.0',
-            sha256: createHash('sha256').update(archive).digest('hex'),
-            size: archive.byteLength,
-            fileCount: 2,
-            files: [],
-            downloadUrl: `${server!.url.origin}/api/v1/marketplace/downloads/deep-research/1.2.0?expires=9999999999&signature=test`,
-          }
-          return Response.json({ data: manifest, requestId: 'request-manifest' })
-        }
-        if (url.pathname === '/api/v1/marketplace/downloads/deep-research/1.2.0') {
-          return new Response(Buffer.from(archive), {
-            headers: { 'content-length': String(archive.byteLength), 'content-type': 'application/zip' },
-          })
-        }
-        return Response.json({
-          error: { code: 'NOT_FOUND', message: '测试路由不存在' },
-          requestId: 'request-not-found',
-        }, { status: 404 })
-      },
-    })
-    const client = createMarketplaceCatalogClient({
-      enableFixture: false,
-      runtime: 'production',
-      apiBaseUrl: `${server.url.origin}/api/v1`,
-    })
-    const workspaceRoot = join(temporaryHome, '.proma', 'agent-workspaces', 'research')
-    const installer = new MarketplaceInstaller({
-      catalogClient: client,
-      resolveWorkspaceDirectories: () => ({
-        skillsDirectory: join(workspaceRoot, 'skills'),
-        inactiveSkillsDirectory: join(workspaceRoot, 'skills-inactive'),
-      }),
-      createInstallId: () => 'install-http',
-      now: () => new Date('2026-07-18T06:00:00.000Z'),
-    })
+    const requestedPaths = startTestApi(archive)
+    const { installer, workspaceRoot } = createHttpInstaller(home, 'install-http')
 
     const queued = installer.install({
       workspaceSlug: 'research',
