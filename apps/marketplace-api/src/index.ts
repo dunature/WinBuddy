@@ -4,7 +4,7 @@ import { createMarketplaceDatabase } from './database/client'
 
 const config = loadMarketplaceConfig()
 const database = createMarketplaceDatabase(config.databaseUrl)
-const app = createMarketplaceApp({ database })
+const app = createMarketplaceApp({ database, webRoot: config.webRoot })
 
 Bun.serve({
   hostname: config.host,

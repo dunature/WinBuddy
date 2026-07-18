@@ -7,10 +7,12 @@ describe('Marketplace API 配置', () => {
       MARKETPLACE_DATABASE_URL: 'postgres://localhost/marketplace',
       MARKETPLACE_HOST: '0.0.0.0',
       MARKETPLACE_PORT: '4318',
+      MARKETPLACE_WEB_DIR: '/tmp/marketplace-web',
     })).toEqual({
       databaseUrl: 'postgres://localhost/marketplace',
       host: '0.0.0.0',
       port: 4318,
+      webRoot: '/tmp/marketplace-web',
     })
   })
 

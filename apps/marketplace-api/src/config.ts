@@ -1,8 +1,13 @@
+import { fileURLToPath } from 'node:url'
+
 export interface MarketplaceConfig {
   databaseUrl: string
   host: string
   port: number
+  webRoot: string
 }
+
+const defaultWebRoot = fileURLToPath(new URL('../../marketplace-web/dist', import.meta.url))
 
 export function loadMarketplaceConfig(env: Record<string, string | undefined> = Bun.env): MarketplaceConfig {
   const databaseUrl = env.MARKETPLACE_DATABASE_URL?.trim()
@@ -27,5 +32,6 @@ export function loadMarketplaceConfig(env: Record<string, string | undefined> = 
     databaseUrl,
     host: env.MARKETPLACE_HOST?.trim() || '127.0.0.1',
     port,
+    webRoot: env.MARKETPLACE_WEB_DIR?.trim() || defaultWebRoot,
   }
 }
