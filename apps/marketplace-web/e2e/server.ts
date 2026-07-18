@@ -102,6 +102,7 @@ const app = createMarketplaceApp({
   allowedOrigin: 'http://localhost:4320',
   sessionDurationMs,
   storageDir,
+  downloadSigningSecret: 'e2e-download-signing-secret-with-32-bytes',
 })
 app.post('/__e2e__/expire-admin-sessions', async (context) => {
   await database.sql`UPDATE admin_sessions SET invalidated_at = now() WHERE invalidated_at IS NULL`

@@ -5,6 +5,8 @@ import type {
   MarketplaceAdminSkillSummary,
   MarketplaceAdminUpload,
   MarketplaceAdminVersion,
+  MarketplaceAdminVersionActionResult,
+  MarketplaceGoldenPathAction,
   MarketplaceApiPage,
   MarketplaceApiSuccess,
   MarketplacePage,
@@ -73,7 +75,7 @@ export interface AdminSkillWriteInput {
 }
 
 export async function listAdminSkills(): Promise<MarketplacePage<MarketplaceAdminSkillSummary>> {
-  return adminPageRequest('/admin/skills?status=draft&pageSize=50')
+  return adminPageRequest('/admin/skills?pageSize=50')
 }
 
 export async function getAdminSkill(skillId: string): Promise<MarketplaceAdminSkillDetail> {
@@ -167,6 +169,22 @@ export async function uploadAdminVersion(
         'x-csrf-token': csrfToken,
       },
       body: file,
+    },
+  )
+}
+
+export async function performAdminVersionAction(
+  skillId: string,
+  versionId: string,
+  action: MarketplaceGoldenPathAction,
+  csrfToken: string,
+): Promise<MarketplaceAdminVersionActionResult> {
+  return adminRequest(
+    `/admin/skills/${encodeURIComponent(skillId)}/versions/${encodeURIComponent(versionId)}/actions/${action}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+      body: JSON.stringify({}),
     },
   )
 }
