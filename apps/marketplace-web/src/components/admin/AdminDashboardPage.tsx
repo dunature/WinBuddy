@@ -5,14 +5,22 @@ import { FilePlus2, LoaderCircle, LogOut, RefreshCw, ShieldCheck } from 'lucide-
 import type {
   MarketplaceAdminSkillDetail,
   MarketplaceAdminSkillSummary,
+  MarketplaceAdminCategory,
+  MarketplaceAdminTag,
   MarketplaceAdminUpload,
   MarketplaceAdminVersion,
 } from '@proma/shared'
-import { getAdminSkill, listAdminSkills, logoutAdmin } from '../../admin-api'
+import {
+  getAdminSkill,
+  listAdminCategories,
+  listAdminSkills,
+  listAdminTags,
+  logoutAdmin,
+} from '../../admin-api'
 import { adminDraftWorkspaceAtom } from '../../admin-draft-state'
 import { adminAuthAtom } from '../../admin-state'
-import { listMarketplaceCategories } from '../../api'
 import { AdminSkillEditor } from './AdminSkillEditor'
+import { AdminTaxonomyPanel } from './AdminTaxonomyPanel'
 import { AdminVersionPanel } from './AdminVersionPanel'
 
 function upsertSkill(
@@ -32,12 +40,15 @@ export function AdminDashboardPage(): React.ReactElement {
   const loadWorkspace = React.useCallback(async (): Promise<void> => {
     setWorkspace((current) => ({ ...current, status: 'loading', error: null }))
     try {
-      const [skills, categories] = await Promise.all([listAdminSkills(), listMarketplaceCategories()])
+      const [skills, categories, tags] = await Promise.all([
+        listAdminSkills(), listAdminCategories(), listAdminTags(),
+      ])
       const selectedSkill = skills.items[0] ? await getAdminSkill(skills.items[0].id) : null
       setWorkspace({
         status: 'ready',
         items: skills.items,
         categories,
+        tags,
         selectedSkill,
         creating: false,
         error: null,
@@ -69,6 +80,25 @@ export function AdminDashboardPage(): React.ReactElement {
     }
   }
 
+  const taxonomyChanged = (
+    categories: MarketplaceAdminCategory[],
+    tags: MarketplaceAdminTag[],
+  ): void => {
+    setWorkspace((current) => ({ ...current, categories, tags, error: null }))
+  }
+
+  const refreshTaxonomy = React.useCallback(async (): Promise<void> => {
+    try {
+      const [categories, tags] = await Promise.all([listAdminCategories(), listAdminTags()])
+      taxonomyChanged(categories, tags)
+    } catch (requestError) {
+      setWorkspace((current) => ({
+        ...current,
+        error: requestError instanceof Error ? requestError.message : '分类标签刷新失败',
+      }))
+    }
+  }, [setWorkspace])
+
   const saved = (skill: MarketplaceAdminSkillDetail): void => {
     setWorkspace((current) => ({
       ...current,
@@ -78,6 +108,7 @@ export function AdminDashboardPage(): React.ReactElement {
       creating: false,
       error: null,
     }))
+    void refreshTaxonomy()
   }
 
   const deleted = (skillId: string): void => {
@@ -87,6 +118,7 @@ export function AdminDashboardPage(): React.ReactElement {
       selectedSkill: current.selectedSkill?.id === skillId ? null : current.selectedSkill,
       creating: false,
     }))
+    void refreshTaxonomy()
   }
 
   const versionCreated = (version: MarketplaceAdminVersion): void => {
@@ -127,7 +159,7 @@ export function AdminDashboardPage(): React.ReactElement {
     try {
       await logoutAdmin(auth.session.csrfToken)
       setAuth({ status: 'unauthenticated', session: null })
-      setWorkspace({ status: 'idle', items: [], categories: [], selectedSkill: null, creating: false, error: null })
+      setWorkspace({ status: 'idle', items: [], categories: [], tags: [], selectedSkill: null, creating: false, error: null })
       navigate('/admin/login', { replace: true })
     } catch (requestError) {
       setLogoutError(requestError instanceof Error ? requestError.message : '退出失败，请重试')
@@ -170,6 +202,15 @@ export function AdminDashboardPage(): React.ReactElement {
             <FilePlus2 size={18} /> 新建 Skill
           </button>
         </section>
+
+        {workspace.status !== 'loading' && (
+          <AdminTaxonomyPanel
+            categories={workspace.categories}
+            tags={workspace.tags}
+            csrfToken={csrfToken}
+            onChanged={taxonomyChanged}
+          />
+        )}
 
         {workspace.status === 'loading' && workspace.items.length === 0 ? (
           <div className="grid min-h-[420px] place-items-center rounded-[28px] bg-white/[0.05]">
@@ -216,6 +257,7 @@ export function AdminDashboardPage(): React.ReactElement {
                     key={workspace.creating ? 'new' : workspace.selectedSkill?.id}
                     skill={workspace.creating ? null : workspace.selectedSkill}
                     categories={workspace.categories}
+                    tags={workspace.tags}
                     csrfToken={csrfToken}
                     onSaved={saved}
                     onDeleted={deleted}

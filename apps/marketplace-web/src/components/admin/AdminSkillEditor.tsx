@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { ArchiveX, LoaderCircle, Save } from 'lucide-react'
-import type { MarketplaceAdminSkillDetail, MarketplaceCategory } from '@proma/shared'
+import type { MarketplaceAdminCategory, MarketplaceAdminSkillDetail, MarketplaceAdminTag } from '@proma/shared'
 import {
   createAdminSkill,
   deleteAdminSkill,
@@ -10,13 +10,19 @@ import {
 
 interface AdminSkillEditorProps {
   skill: MarketplaceAdminSkillDetail | null
-  categories: MarketplaceCategory[]
+  categories: MarketplaceAdminCategory[]
+  tags: MarketplaceAdminTag[]
   csrfToken: string
   onSaved(skill: MarketplaceAdminSkillDetail): void
   onDeleted(skillId: string): void
 }
 
-function initialForm(skill: MarketplaceAdminSkillDetail | null, categories: MarketplaceCategory[]): AdminSkillWriteInput {
+function initialForm(
+  skill: MarketplaceAdminSkillDetail | null,
+  categories: MarketplaceAdminCategory[],
+  tags: MarketplaceAdminTag[],
+): AdminSkillWriteInput {
+  const availableTagIds = new Set(tags.map((tag) => tag.id))
   return {
     identifier: skill?.identifier ?? '',
     name: skill?.name ?? '',
@@ -25,7 +31,7 @@ function initialForm(skill: MarketplaceAdminSkillDetail | null, categories: Mark
     authorName: skill?.authorName ?? '',
     ...(skill?.authorUrl ? { authorUrl: skill.authorUrl } : {}),
     categoryId: skill?.categoryId ?? categories[0]?.id ?? '',
-    tags: skill?.tags ?? [],
+    tagIds: skill?.tagIds.filter((tagId) => availableTagIds.has(tagId)) ?? [],
     icon: skill?.icon ?? '',
     featured: skill?.featured ?? false,
   }
@@ -34,22 +40,21 @@ function initialForm(skill: MarketplaceAdminSkillDetail | null, categories: Mark
 export function AdminSkillEditor({
   skill,
   categories,
+  tags,
   csrfToken,
   onSaved,
   onDeleted,
 }: AdminSkillEditorProps): React.ReactElement {
-  const [form, setForm] = React.useState(() => initialForm(skill, categories))
-  const [tagsText, setTagsText] = React.useState(skill?.tags.join(', ') ?? '')
+  const [form, setForm] = React.useState(() => initialForm(skill, categories, tags))
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const editable = !skill || skill.allowedActions.includes('edit_draft')
   const title = !skill ? '新建 Skill 草稿' : editable ? '编辑 Skill 草稿' : 'Skill 档案'
 
   React.useEffect(() => {
-    setForm(initialForm(skill, categories))
-    setTagsText(skill?.tags.join(', ') ?? '')
+    setForm(initialForm(skill, categories, tags))
     setError(null)
-  }, [categories, skill])
+  }, [categories, skill, tags])
 
   const setField = <K extends keyof AdminSkillWriteInput>(key: K, value: AdminSkillWriteInput[K]): void => {
     setForm((current) => ({ ...current, [key]: value }))
@@ -60,14 +65,10 @@ export function AdminSkillEditor({
     if (!editable) return
     setSubmitting(true)
     setError(null)
-    const input = {
-      ...form,
-      tags: [...new Set(tagsText.split(',').map((tag) => tag.trim()).filter(Boolean))],
-    }
     try {
       const saved = skill
-        ? await updateAdminSkill(skill.id, skill.revision, input, csrfToken)
-        : await createAdminSkill(input, csrfToken)
+        ? await updateAdminSkill(skill.id, skill.revision, form, csrfToken)
+        : await createAdminSkill(form, csrfToken)
       onSaved(saved)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Skill 草稿保存失败')
@@ -141,10 +142,25 @@ export function AdminSkillEditor({
               {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </select>
           </label>
-          <label className="admin-compact-field sm:col-span-2">
+          <fieldset className="admin-compact-field sm:col-span-2">
             <span>标签</span>
-            <input value={tagsText} onChange={(event) => setTagsText(event.target.value)} placeholder="自动化, 简报" />
-          </label>
+            <div className="flex min-h-12 flex-wrap gap-2 rounded-2xl bg-white/70 p-2 shadow-[inset_0_0_0_1px_rgba(16,35,61,0.1)]">
+              {tags.length === 0 ? (
+                <span className="px-2 py-1 text-xs text-[var(--muted)]">请先在上方创建标签</span>
+              ) : tags.map((tag) => (
+                <label key={tag.id} className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-1.5 text-xs font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={form.tagIds.includes(tag.id)}
+                    onChange={(event) => setField('tagIds', event.target.checked
+                      ? [...form.tagIds, tag.id]
+                      : form.tagIds.filter((id) => id !== tag.id))}
+                  />
+                  {tag.name}
+                </label>
+              ))}
+            </div>
+          </fieldset>
         </div>
         <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
           <label className="admin-compact-field">

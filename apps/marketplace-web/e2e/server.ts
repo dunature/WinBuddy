@@ -14,11 +14,11 @@ if (!adminDatabaseUrl) throw new Error('E2E 缺少 MARKETPLACE_TEST_ADMIN_DATABA
 
 async function seedCatalog(sql: Sql): Promise<void> {
   await sql`
-    INSERT INTO categories (id, name, icon)
+    INSERT INTO categories (id, name, normalized_name, icon)
     VALUES
-      ('research', '研究分析', 'search'),
-      ('docs', '文档创作', 'file-text'),
-      ('automation', '效率自动化', 'workflow')
+      ('research', '研究分析', '研究分析', 'search'),
+      ('docs', '文档创作', '文档创作', 'file-text'),
+      ('automation', '效率自动化', '效率自动化', 'workflow')
   `
 
   await sql`
