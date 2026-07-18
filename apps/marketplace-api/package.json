@@ -1,0 +1,26 @@
+{
+  "name": "@proma/marketplace-api",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "description": "Bun and Hono API for the Proma marketplace",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "start": "bun src/index.ts",
+    "build": "bun build src/index.ts --target=bun --outdir=dist",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "db:migrate": "bun src/migrate.ts"
+  },
+  "dependencies": {
+    "@proma/marketplace-domain": "workspace:*",
+    "@proma/shared": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "hono": "4.12.30",
+    "postgres": "3.4.9"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
