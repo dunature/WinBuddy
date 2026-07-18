@@ -1,0 +1,67 @@
+name: Marketplace Governance
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/marketplace-governance.yml'
+      - 'apps/marketplace-api/**'
+      - 'apps/marketplace-web/**'
+      - 'packages/marketplace-domain/**'
+      - 'packages/shared/**'
+      - 'bun.lock'
+      - 'package.json'
+
+concurrency:
+  group: marketplace-governance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      MARKETPLACE_TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Bun 1.3.13
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+
+      - name: 安装依赖
+        run: bun install --frozen-lockfile
+
+      - name: 安装 Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: 验证领域、API 与 Web 单元测试
+        run: bun test packages/marketplace-domain/src apps/marketplace-api/tests apps/marketplace-web/src --timeout 30000
+
+      - name: 类型检查与构建
+        run: >-
+          bun run --filter='@proma/marketplace-domain' typecheck &&
+          bun run --filter='@proma/shared' typecheck &&
+          bun run --filter='@proma/marketplace-api' typecheck &&
+          bun run --filter='@proma/marketplace-web' typecheck &&
+          bun run --filter='@proma/marketplace-api' build &&
+          bun run --filter='@proma/marketplace-web' build
+
+      - name: 验证公开市场与治理工作台
+        working-directory: apps/marketplace-web
+        run: bunx playwright test --project=chromium

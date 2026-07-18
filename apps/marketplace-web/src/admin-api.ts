@@ -6,7 +6,7 @@ import type {
   MarketplaceAdminUpload,
   MarketplaceAdminVersion,
   MarketplaceAdminVersionActionResult,
-  MarketplaceGoldenPathAction,
+  MarketplaceVersionGovernanceAction,
   MarketplaceApiPage,
   MarketplaceApiSuccess,
   MarketplacePage,
@@ -176,15 +176,20 @@ export async function uploadAdminVersion(
 export async function performAdminVersionAction(
   skillId: string,
   versionId: string,
-  action: MarketplaceGoldenPathAction,
+  action: MarketplaceVersionGovernanceAction,
   csrfToken: string,
+  reason = '',
 ): Promise<MarketplaceAdminVersionActionResult> {
   return adminRequest(
     `/admin/skills/${encodeURIComponent(skillId)}/versions/${encodeURIComponent(versionId)}/actions/${action}`,
     {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
-      body: JSON.stringify({}),
+      headers: {
+        'content-type': 'application/json',
+        'x-csrf-token': csrfToken,
+        'idempotency-key': crypto.randomUUID(),
+      },
+      body: JSON.stringify({ reason }),
     },
   )
 }

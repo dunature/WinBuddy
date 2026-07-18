@@ -9,7 +9,7 @@ interface AdminVersionPanelProps {
   skill: MarketplaceAdminSkillDetail
   csrfToken: string
   onCreated(version: MarketplaceAdminVersion): void
-  onVersionChanged(upload: MarketplaceAdminUpload): void
+  onVersionChanged(skillId: string, upload: MarketplaceAdminUpload): void
   onActionCompleted(skill: MarketplaceAdminSkillDetail): void
 }
 
@@ -44,9 +44,11 @@ export function AdminVersionPanel({ skill, csrfToken, onCreated, onVersionChange
           <div className="admin-step">VERSION LEDGER</div>
           <h3 className="mt-2 font-display text-2xl font-semibold text-[var(--ink)]">候选版本</h3>
         </div>
-        <button type="button" onClick={() => setCreating((value) => !value)} className="admin-secondary-button">
-          <GitBranchPlus size={16} /> 新建候选版本
-        </button>
+        {skill.allowedActions.includes('create_version') && (
+          <button type="button" onClick={() => setCreating((value) => !value)} className="admin-secondary-button">
+            <GitBranchPlus size={16} /> 新建候选版本
+          </button>
+        )}
       </div>
 
       {creating && (
@@ -84,7 +86,7 @@ export function AdminVersionPanel({ skill, csrfToken, onCreated, onVersionChange
               skillId={skill.id}
               version={item}
               csrfToken={csrfToken}
-              onVersionChanged={onVersionChanged}
+              onVersionChanged={(upload) => onVersionChanged(skill.id, upload)}
             />
             <AdminVersionActions
               skillId={skill.id}

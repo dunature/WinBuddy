@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 import {
   createMarketplaceCandidateVersionState,
   createMarketplaceDraftSkillState,
+  getMarketplaceSkillGovernance,
+  getMarketplaceVersionGovernance,
   normalizeMarketplacePagination,
 } from '@proma/marketplace-domain'
 import type {
@@ -98,11 +100,17 @@ interface VersionRow {
   updated_at: Date | string
 }
 
+interface VersionWithSkillRow extends VersionRow {
+  skill_status: MarketplaceSkillStatus
+  current_published_version_id: string | null
+}
+
 function timestamp(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString()
 }
 
 function toAdminSkill(row: SkillRow): MarketplaceAdminSkillSummary {
+  const governance = getMarketplaceSkillGovernance(row.status)
   return {
     id: row.id,
     identifier: row.identifier,
@@ -116,6 +124,7 @@ function toAdminSkill(row: SkillRow): MarketplaceAdminSkillSummary {
     icon: row.icon,
     featured: row.featured,
     status: row.status,
+    ...governance,
     currentPublishedVersionId: row.current_published_version_id,
     revision: row.revision,
     createdAt: timestamp(row.created_at),
@@ -123,13 +132,22 @@ function toAdminSkill(row: SkillRow): MarketplaceAdminSkillSummary {
   }
 }
 
-function toAdminVersion(row: VersionRow): MarketplaceAdminVersion {
+function toAdminVersion(
+  row: VersionRow,
+  skill: Pick<SkillRow, 'status' | 'current_published_version_id'>,
+): MarketplaceAdminVersion {
+  const governance = getMarketplaceVersionGovernance(row.status, {
+    versionId: row.id,
+    skillStatus: skill.status,
+    currentPublishedVersionId: skill.current_published_version_id,
+  })
   return {
     id: row.id,
     skillId: row.skill_id,
     version: row.version,
     changelog: row.changelog,
     status: row.status,
+    ...governance,
     revision: row.revision,
     createdAt: timestamp(row.created_at),
     updatedAt: timestamp(row.updated_at),
@@ -161,7 +179,7 @@ export async function getMarketplaceAdminSkill(
     WHERE skill_id = ${skillId}
     ORDER BY created_at DESC, id DESC
   `
-  return { ...toAdminSkill(skill), versions: versions.map(toAdminVersion) }
+  return { ...toAdminSkill(skill), versions: versions.map((version) => toAdminVersion(version, skill)) }
 }
 
 export async function getMarketplaceAdminVersion(
@@ -169,15 +187,20 @@ export async function getMarketplaceAdminVersion(
   skillId: string,
   versionId: string,
 ): Promise<MarketplaceAdminVersion | null> {
-  const rows = await database.sql<VersionRow[]>`
+  const rows = await database.sql<VersionWithSkillRow[]>`
     SELECT versions.id, versions.skill_id, versions.version, versions.changelog, versions.status,
-      versions.revision, versions.created_at, versions.updated_at
+      versions.revision, versions.created_at, versions.updated_at,
+      skills.status AS skill_status, skills.current_published_version_id
     FROM skill_versions versions
     INNER JOIN skills ON skills.id = versions.skill_id
     WHERE versions.id = ${versionId} AND versions.skill_id = ${skillId} AND skills.deleted_at IS NULL
     LIMIT 1
   `
-  return rows[0] ? toAdminVersion(rows[0]) : null
+  const version = rows[0]
+  return version ? toAdminVersion(version, {
+    status: version.skill_status,
+    current_published_version_id: version.current_published_version_id,
+  }) : null
 }
 
 export async function listMarketplaceAdminSkills(
@@ -346,14 +369,20 @@ export async function createMarketplaceAdminVersion(
   const versionId = randomUUID()
   try {
     await database.sql.begin(async (transaction) => {
-      const skills = await transaction<{ current_published_version_id: string | null }[]>`
-        SELECT current_published_version_id
+      const skills = await transaction<{
+        status: MarketplaceSkillStatus
+        current_published_version_id: string | null
+      }[]>`
+        SELECT status, current_published_version_id
         FROM skills
         WHERE id = ${skillId} AND deleted_at IS NULL
         FOR UPDATE
       `
       const skill = skills[0]
       if (!skill) throw new MarketplaceAdminDraftError('SKILL_NOT_FOUND', 'Skill 不存在', 404)
+      if (!getMarketplaceSkillGovernance(skill.status).allowedActions.includes('create_version')) {
+        throw new MarketplaceAdminDraftError('SKILL_VERSION_CREATION_NOT_ALLOWED', '当前 Skill 状态不能新建版本', 409)
+      }
       const initialState = createMarketplaceCandidateVersionState(skill.current_published_version_id)
       await transaction`
         INSERT INTO skill_versions (
@@ -411,7 +440,7 @@ export async function updateMarketplaceAdminVersion(
       `
       const current = rows[0]
       if (!current) throw new MarketplaceAdminDraftError('VERSION_NOT_FOUND', '候选版本不存在', 404)
-      if (!['created', 'validation_failed', 'rejected'].includes(current.status)) {
+      if (!['created', 'validation_failed'].includes(current.status)) {
         throw new MarketplaceAdminDraftError('VERSION_NOT_EDITABLE', '当前状态的版本不能编辑', 409)
       }
       if (current.revision !== input.revision) {

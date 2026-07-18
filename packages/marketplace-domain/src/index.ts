@@ -307,6 +307,170 @@ export const MARKETPLACE_VERSION_STATUSES = [
 export type MarketplaceSkillStatus = typeof MARKETPLACE_SKILL_STATUSES[number]
 export type MarketplaceVersionStatus = typeof MARKETPLACE_VERSION_STATUSES[number]
 
+export type MarketplaceVersionGovernanceAction =
+  | 'submit_review'
+  | 'approve'
+  | 'reject'
+  | 'return_to_edit'
+  | 'withdraw'
+  | 'publish'
+  | 'unpublish'
+  | 'republish'
+  | 'archive'
+
+export type MarketplaceVersionAllowedAction = MarketplaceVersionGovernanceAction | 'reupload'
+
+export interface MarketplaceVersionGovernanceDecision {
+  allowedActions: MarketplaceVersionAllowedAction[]
+  nextAction: MarketplaceVersionAllowedAction | null
+}
+
+export interface MarketplaceVersionGovernanceContext {
+  versionId: string
+  skillStatus: MarketplaceSkillStatus
+  currentPublishedVersionId: string | null
+}
+
+export interface MarketplaceVersionGovernanceState {
+  action: MarketplaceVersionGovernanceAction
+  versionId: string
+  versionStatus: MarketplaceVersionStatus
+  skillStatus: MarketplaceSkillStatus
+  currentPublishedVersionId: string | null
+}
+
+export interface MarketplaceVersionGovernanceResult {
+  changed: boolean
+  versionStatus: MarketplaceVersionStatus
+  skillStatus: MarketplaceSkillStatus
+  currentPublishedVersionId: string | null
+}
+
+export class MarketplaceVersionGovernanceError extends Error {
+  constructor(readonly code: 'MARKETPLACE_VERSION_ACTION_NOT_ALLOWED' | 'MARKETPLACE_PUBLISHED_POINTER_MISMATCH') {
+    super(code)
+    this.name = 'MarketplaceVersionGovernanceError'
+  }
+}
+
+export type MarketplaceSkillGovernanceAction = 'edit_draft' | 'create_version' | 'delete_draft'
+
+export interface MarketplaceSkillGovernanceDecision {
+  allowedActions: MarketplaceSkillGovernanceAction[]
+  nextAction: MarketplaceSkillGovernanceAction | null
+}
+
+const skillGovernanceDecisions: Record<MarketplaceSkillStatus, MarketplaceSkillGovernanceDecision> = {
+  draft: { allowedActions: ['edit_draft', 'create_version', 'delete_draft'], nextAction: 'create_version' },
+  published: { allowedActions: ['create_version'], nextAction: 'create_version' },
+  unpublished: { allowedActions: ['create_version'], nextAction: 'create_version' },
+  archived: { allowedActions: [], nextAction: null },
+}
+
+export function getMarketplaceSkillGovernance(
+  status: MarketplaceSkillStatus,
+): MarketplaceSkillGovernanceDecision {
+  const decision = skillGovernanceDecisions[status]
+  return { allowedActions: [...decision.allowedActions], nextAction: decision.nextAction }
+}
+
+const governanceDecisions: Record<MarketplaceVersionStatus, MarketplaceVersionGovernanceDecision> = {
+  created: { allowedActions: ['reupload', 'submit_review', 'archive'], nextAction: 'submit_review' },
+  validation_failed: { allowedActions: ['reupload', 'archive'], nextAction: 'reupload' },
+  pending_review: { allowedActions: ['approve', 'reject', 'withdraw'], nextAction: 'approve' },
+  approved: { allowedActions: ['publish', 'withdraw'], nextAction: 'publish' },
+  rejected: { allowedActions: ['reupload', 'return_to_edit', 'archive'], nextAction: 'return_to_edit' },
+  published: { allowedActions: ['unpublish'], nextAction: 'unpublish' },
+  unpublished: { allowedActions: ['republish', 'archive'], nextAction: 'republish' },
+  archived: { allowedActions: [], nextAction: null },
+}
+
+export function getMarketplaceVersionGovernance(
+  status: MarketplaceVersionStatus,
+  context?: MarketplaceVersionGovernanceContext,
+): MarketplaceVersionGovernanceDecision {
+  if (status === 'published' && context?.currentPublishedVersionId !== context?.versionId) {
+    return { allowedActions: [], nextAction: null }
+  }
+  if (status === 'unpublished' && context && context.skillStatus !== 'unpublished') {
+    return { allowedActions: ['archive'], nextAction: 'archive' }
+  }
+  const decision = governanceDecisions[status]
+  return { allowedActions: [...decision.allowedActions], nextAction: decision.nextAction }
+}
+
+const governanceTransitions: Record<MarketplaceVersionGovernanceAction, {
+  from: MarketplaceVersionStatus[]
+  to: MarketplaceVersionStatus
+}> = {
+  submit_review: { from: ['created'], to: 'pending_review' },
+  approve: { from: ['pending_review'], to: 'approved' },
+  reject: { from: ['pending_review'], to: 'rejected' },
+  return_to_edit: { from: ['rejected'], to: 'created' },
+  withdraw: { from: ['pending_review', 'approved'], to: 'created' },
+  publish: { from: ['approved'], to: 'published' },
+  unpublish: { from: ['published'], to: 'unpublished' },
+  republish: { from: ['unpublished'], to: 'published' },
+  archive: { from: ['created', 'validation_failed', 'rejected', 'unpublished'], to: 'archived' },
+}
+
+function assertPublishedPointer(state: MarketplaceVersionGovernanceState): void {
+  const requiresCurrentPointer = (state.action === 'unpublish' && state.versionStatus === 'published')
+    || (state.action === 'publish' && state.versionStatus === 'published')
+    || (state.action === 'republish' && state.versionStatus === 'published')
+  if (requiresCurrentPointer && state.currentPublishedVersionId !== state.versionId) {
+    throw new MarketplaceVersionGovernanceError('MARKETPLACE_PUBLISHED_POINTER_MISMATCH')
+  }
+  if (state.action === 'unpublish' && state.versionStatus === 'unpublished' && state.currentPublishedVersionId !== null) {
+    throw new MarketplaceVersionGovernanceError('MARKETPLACE_PUBLISHED_POINTER_MISMATCH')
+  }
+  if (state.action === 'republish' && state.versionStatus === 'unpublished' && state.currentPublishedVersionId !== null) {
+    throw new MarketplaceVersionGovernanceError('MARKETPLACE_PUBLISHED_POINTER_MISMATCH')
+  }
+}
+
+export function applyMarketplaceVersionGovernanceAction(
+  state: MarketplaceVersionGovernanceState,
+): MarketplaceVersionGovernanceResult {
+  const transition = governanceTransitions[state.action]
+  assertPublishedPointer(state)
+  if (state.versionStatus === transition.to) {
+    return {
+      changed: false,
+      versionStatus: state.versionStatus,
+      skillStatus: state.skillStatus,
+      currentPublishedVersionId: state.currentPublishedVersionId,
+    }
+  }
+  if (!transition.from.includes(state.versionStatus)) {
+    throw new MarketplaceVersionGovernanceError('MARKETPLACE_VERSION_ACTION_NOT_ALLOWED')
+  }
+  if (state.action === 'unpublish' && state.currentPublishedVersionId !== state.versionId) {
+    throw new MarketplaceVersionGovernanceError('MARKETPLACE_PUBLISHED_POINTER_MISMATCH')
+  }
+  let skillStatus = state.skillStatus
+  let currentPublishedVersionId = state.currentPublishedVersionId
+  if (state.action === 'publish' || state.action === 'republish') {
+    skillStatus = 'published'
+    currentPublishedVersionId = state.versionId
+  } else if (state.action === 'unpublish') {
+    skillStatus = 'unpublished'
+    currentPublishedVersionId = null
+  } else if (
+    state.action === 'archive'
+    && state.versionStatus === 'unpublished'
+    && state.skillStatus === 'unpublished'
+  ) {
+    skillStatus = 'archived'
+  }
+  return {
+    changed: true,
+    versionStatus: transition.to,
+    skillStatus,
+    currentPublishedVersionId,
+  }
+}
+
 export type MarketplaceGoldenPathAction = 'submit_review' | 'approve' | 'publish'
 
 export interface MarketplaceGoldenPathState {
@@ -331,38 +495,16 @@ export class MarketplaceGoldenPathError extends Error {
   }
 }
 
-const goldenPathTransitions: Record<MarketplaceGoldenPathAction, {
-  from: MarketplaceVersionStatus
-  to: MarketplaceVersionStatus
-}> = {
-  submit_review: { from: 'created', to: 'pending_review' },
-  approve: { from: 'pending_review', to: 'approved' },
-  publish: { from: 'approved', to: 'published' },
-}
-
 export function applyMarketplaceGoldenPathAction(
   state: MarketplaceGoldenPathState,
 ): MarketplaceGoldenPathResult {
-  const transition = goldenPathTransitions[state.action]
-  if (state.versionStatus === transition.to) {
-    if (state.action === 'publish' && state.currentPublishedVersionId !== state.versionId) {
-      throw new MarketplaceGoldenPathError('MARKETPLACE_PUBLISHED_POINTER_MISMATCH')
+  try {
+    return applyMarketplaceVersionGovernanceAction(state)
+  } catch (error) {
+    if (error instanceof MarketplaceVersionGovernanceError) {
+      throw new MarketplaceGoldenPathError(error.code)
     }
-    return {
-      changed: false,
-      versionStatus: state.versionStatus,
-      skillStatus: state.skillStatus,
-      currentPublishedVersionId: state.currentPublishedVersionId,
-    }
-  }
-  if (state.versionStatus !== transition.from) {
-    throw new MarketplaceGoldenPathError('MARKETPLACE_VERSION_ACTION_NOT_ALLOWED')
-  }
-  return {
-    changed: true,
-    versionStatus: transition.to,
-    skillStatus: state.action === 'publish' ? 'published' : state.skillStatus,
-    currentPublishedVersionId: state.action === 'publish' ? state.versionId : state.currentPublishedVersionId,
+    throw error
   }
 }
 

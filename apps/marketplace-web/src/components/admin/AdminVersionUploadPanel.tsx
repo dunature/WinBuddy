@@ -158,9 +158,7 @@ export function AdminVersionUploadPanel({
   }
 
   const latest = state.items[0] ?? null
-  const uploadable = version.status === 'created'
-    || version.status === 'validation_failed'
-    || version.status === 'rejected'
+  const uploadable = version.allowedActions.includes('reupload')
   const busy = state.phase === 'uploading' || needsAdminUploadPolling(state.items)
 
   return (

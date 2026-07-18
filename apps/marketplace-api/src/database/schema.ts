@@ -115,3 +115,17 @@ export const validationReports = pgTable('validation_reports', {
   expandedSize: integer('expanded_size').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+export const reviewRecords = pgTable('review_records', {
+  id: text('id').primaryKey(),
+  skillId: text('skill_id').notNull().references(() => skills.id),
+  versionId: text('version_id').notNull().references(() => skillVersions.id),
+  actorId: text('actor_id').references(() => admins.id, { onDelete: 'set null' }),
+  action: text('action').notNull(),
+  idempotencyKey: text('idempotency_key').notNull().unique(),
+  requestId: text('request_id').notNull(),
+  reason: text('reason'),
+  beforeState: jsonb('before_state').notNull(),
+  afterState: jsonb('after_state').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
