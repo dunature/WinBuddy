@@ -37,11 +37,17 @@ function entryKind(entry: Entry): MarketplaceZipEntryKind {
   return entry.fileName.endsWith('/') || fileType === UNIX_DIRECTORY ? 'directory' : 'file'
 }
 
-async function readEntry(entry: Entry, zipFile: Awaited<ReturnType<typeof openPromise>>): Promise<Buffer> {
+async function readEntry(
+  entry: Entry,
+  zipFile: Awaited<ReturnType<typeof openPromise>>,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  signal?.throwIfAborted()
   const stream = await zipFile.openReadStreamPromise(entry)
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of stream) {
+    signal?.throwIfAborted()
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array)
     size += buffer.byteLength
     if (size > MARKETPLACE_ZIP_LIMITS.singleFileBytes) throw new Error('解压文件超过单文件限制')
@@ -54,6 +60,7 @@ export async function inspectMarketplaceArchive(
   archivePath: string,
   identifier: string,
   version: string,
+  signal?: AbortSignal,
 ): Promise<MarketplacePackageValidationResult> {
   const entries: MarketplaceZipEntryDescriptor[] = []
   let skillMdContent: string | undefined
@@ -65,6 +72,7 @@ export async function inspectMarketplaceArchive(
   })
   try {
     for await (const entry of zipFile.eachEntry()) {
+      signal?.throwIfAborted()
       const kind = entryKind(entry)
       entries.push({
         path: entry.fileName,
@@ -74,9 +82,10 @@ export async function inspectMarketplaceArchive(
       })
       if (kind !== 'file' || entry.fileName.replaceAll('\\', '/') !== `${identifier}/SKILL.md`) continue
       if (entry.uncompressedSize > MARKETPLACE_MAX_TEXT_PREVIEW_BYTES) continue
-      skillMdContent = new TextDecoder('utf-8', { fatal: true }).decode(await readEntry(entry, zipFile))
+      skillMdContent = new TextDecoder('utf-8', { fatal: true }).decode(await readEntry(entry, zipFile, signal))
     }
   } catch (error) {
+    if (signal?.aborted) throw signal.reason
     if (error instanceof Error && error.message.includes('invalid relative path')) {
       throw new Error('ZIP 包含非法父目录路径')
     }
@@ -97,6 +106,7 @@ export async function extractMarketplaceArchive(
   archivePath: string,
   identifier: string,
   targetDirectory: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   const prefix = `${identifier}/`
   const zipFile = await openPromise(archivePath, {
@@ -106,6 +116,7 @@ export async function extractMarketplaceArchive(
   })
   try {
     for await (const entry of zipFile.eachEntry()) {
+      signal?.throwIfAborted()
       if (entryKind(entry) !== 'file') continue
       const normalized = entry.fileName.replaceAll('\\', '/')
       if (!normalized.startsWith(prefix)) throw new Error('ZIP 根目录与 Skill identifier 不一致')
@@ -113,7 +124,7 @@ export async function extractMarketplaceArchive(
       if (!relativePath) continue
       const destination = join(targetDirectory, ...relativePath.split('/'))
       await mkdir(dirname(destination), { recursive: true })
-      await writeFile(destination, await readEntry(entry, zipFile))
+      await writeFile(destination, await readEntry(entry, zipFile, signal))
     }
   } finally {
     zipFile.close()

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { rename, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
@@ -56,6 +57,10 @@ function replaceArchivePath(archive: Uint8Array, source: string, target: string)
   return content
 }
 
+function fileSystemError(code: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(`测试文件系统错误: ${code}`), { code })
+}
+
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true })
@@ -63,6 +68,233 @@ afterEach(() => {
 })
 
 describe('MarketplaceInstaller', () => {
+  test('Given 下载中的安装 When 用户取消 Then 任务进入 cancelled 且清理临时资源', async () => {
+    const workspaceRoot = createTemporaryDirectory()
+    const skillsDirectory = join(workspaceRoot, 'skills')
+    const archive = createSkillArchive()
+    let notifyDownloading: (() => void) | undefined
+    const downloading = new Promise<void>((resolve) => { notifyDownloading = resolve })
+    const installer = new MarketplaceInstaller({
+      catalogClient: { getInstallManifest: async () => manifestFor(archive) },
+      resolveWorkspaceDirectories: () => ({
+        skillsDirectory,
+        inactiveSkillsDirectory: join(workspaceRoot, 'skills-inactive'),
+      }),
+      fetchFn: async (_input, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('已中止', 'AbortError')), { once: true })
+      }),
+      createInstallId: () => 'install-cancel-download',
+      onProgress: (state) => {
+        if (state.phase === 'downloading') notifyDownloading?.()
+      },
+    })
+
+    const queued = installer.install({
+      workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0',
+    })
+    await downloading
+
+    expect(installer.cancel(queued.installId)).toBe(true)
+    const completed = await installer.waitForInstall(queued.installId)
+
+    expect(completed.phase).toBe('cancelled')
+    expect(completed.error).toBe('安装已取消')
+    expect(existsSync(join(skillsDirectory, '.deep-research.install-cancel-download.staging'))).toBe(false)
+    expect(existsSync(join(skillsDirectory, '.deep-research.install-cancel-download.zip'))).toBe(false)
+  })
+
+  test('Given 安装进入 extracting When 用户取消 Then 在提交前停止并清理已解压内容', async () => {
+    const workspaceRoot = createTemporaryDirectory()
+    const skillsDirectory = join(workspaceRoot, 'skills')
+    const archive = createSkillArchive()
+    let installId = ''
+    const installer = new MarketplaceInstaller({
+      catalogClient: { getInstallManifest: async () => manifestFor(archive) },
+      resolveWorkspaceDirectories: () => ({
+        skillsDirectory,
+        inactiveSkillsDirectory: join(workspaceRoot, 'skills-inactive'),
+      }),
+      fetchFn: async () => new Response(Buffer.from(archive)),
+      createInstallId: () => 'install-cancel-extract',
+      onProgress: (state) => {
+        if (state.phase === 'extracting') installer.cancel(installId)
+      },
+    })
+
+    const queued = installer.install({
+      workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0',
+    })
+    installId = queued.installId
+    const completed = await installer.waitForInstall(queued.installId)
+
+    expect(completed.phase).toBe('cancelled')
+    expect(existsSync(join(skillsDirectory, 'deep-research'))).toBe(false)
+    expect(existsSync(join(skillsDirectory, '.deep-research.install-cancel-extract.staging'))).toBe(false)
+  })
+
+  test('Given 安装已经进入 committing When 用户尝试取消 Then 拒绝取消并完成原子提交', async () => {
+    const workspaceRoot = createTemporaryDirectory()
+    const archive = createSkillArchive()
+    let cancelResult: boolean | undefined
+    let installId = ''
+    const installer = new MarketplaceInstaller({
+      catalogClient: { getInstallManifest: async () => manifestFor(archive) },
+      resolveWorkspaceDirectories: () => ({
+        skillsDirectory: join(workspaceRoot, 'skills'),
+        inactiveSkillsDirectory: join(workspaceRoot, 'skills-inactive'),
+      }),
+      fetchFn: async () => new Response(Buffer.from(archive)),
+      createInstallId: () => 'install-commit-cancel',
+      onProgress: (state) => {
+        if (state.phase === 'committing') cancelResult = installer.cancel(installId)
+      },
+    })
+
+    const queued = installer.install({
+      workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0',
+    })
+    installId = queued.installId
+    const completed = await installer.waitForInstall(queued.installId)
+
+    expect(cancelResult).toBe(false)
+    expect(completed.phase).toBe('completed')
+  })
+
+  test('Given 工作区存在同名非 marketplace Skill When 安装 Then 返回可确认冲突且保留原目录', async () => {
+    const workspaceRoot = createTemporaryDirectory()
+    const skillsDirectory = join(workspaceRoot, 'skills')
+    const existingDirectory = join(skillsDirectory, 'deep-research')
+    const archive = createSkillArchive()
+    mkdirSync(existingDirectory, { recursive: true })
+    writeFileSync(join(existingDirectory, 'existing.txt'), '用户原有 Skill', 'utf8')
+    const installer = new MarketplaceInstaller({
+      catalogClient: { getInstallManifest: async () => manifestFor(archive) },
+      resolveWorkspaceDirectories: () => ({
+        skillsDirectory,
+        inactiveSkillsDirectory: join(workspaceRoot, 'skills-inactive'),
+      }),
+      fetchFn: async () => new Response(Buffer.from(archive)),
+      createInstallId: () => 'install-local-conflict',
+    })
+
+    const completed = await installer.waitForInstall(installer.install({
+      workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0',
+    }).installId)
+
+    expect(completed.phase).toBe('failed')
+    expect(completed.errorCode).toBe('TARGET_CONFLICT')
+    expect(completed.conflict).toEqual({
+      kind: 'non_marketplace',
+      identifier: 'deep-research',
+      location: 'enabled',
+      replaceable: true,
+    })
+    expect(await Bun.file(join(existingDirectory, 'existing.txt')).text()).toBe('用户原有 Skill')
+  })
+
+  test('Given 用户明确确认原安装冲突 When 继续安装 Then 只替换该请求绑定的非市场 Skill', async () => {
+    const workspaceRoot = createTemporaryDirectory()
+    const skillsDirectory = join(workspaceRoot, 'skills')
+    const existingDirectory = join(skillsDirectory, 'deep-research')
+    const archive = createSkillArchive()
+    mkdirSync(existingDirectory, { recursive: true })
+    writeFileSync(join(existingDirectory, 'existing.txt'), '用户原有 Skill', 'utf8')
+    const ids = ['install-conflict', 'install-confirmed']
+    const installer = new MarketplaceInstaller({
+      catalogClient: { getInstallManifest: async () => manifestFor(archive) },
+      resolveWorkspaceDirectories: () => ({
+        skillsDirectory,
+        inactiveSkillsDirectory: join(workspaceRoot, 'skills-inactive'),
+      }),
+      fetchFn: async () => new Response(Buffer.from(archive)),
+      createInstallId: () => ids.shift()!,
+    })
+    const request = { workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0' }
+    const conflict = await installer.waitForInstall(installer.install(request).installId)
+
+    const confirmed = installer.confirmConflict(conflict.installId)
+    const completed = await installer.waitForInstall(confirmed.installId)
+
+    expect(completed.phase).toBe('completed')
+    expect(readFileSync(join(existingDirectory, 'SKILL.md'), 'utf8')).toContain('# Deep Research')
+    expect(existsSync(join(existingDirectory, 'existing.txt'))).toBe(false)
+    expect(readdirSync(skillsDirectory).filter((name) => name.startsWith('.deep-research.'))).toEqual([])
+  })
+
+  test('Given 同名目录属于另一个 marketplace ID When 安装 Then 返回不可替换冲突并拒绝确认', async () => {
+    const workspaceRoot = createTemporaryDirectory()
+    const skillsDirectory = join(workspaceRoot, 'skills')
+    const existingDirectory = join(skillsDirectory, 'deep-research')
+    const archive = createSkillArchive()
+    mkdirSync(existingDirectory, { recursive: true })
+    writeFileSync(join(existingDirectory, '.source.json'), JSON.stringify({
+      kind: 'marketplace',
+      marketplaceSkillId: 'another-skill',
+      identifier: 'deep-research',
+      installedVersion: '1.0.0',
+      contentHash: 'a'.repeat(64),
+      installedAt: '2026-07-18T00:00:00.000Z',
+    }), 'utf8')
+    const installer = new MarketplaceInstaller({
+      catalogClient: { getInstallManifest: async () => manifestFor(archive) },
+      resolveWorkspaceDirectories: () => ({
+        skillsDirectory,
+        inactiveSkillsDirectory: join(workspaceRoot, 'skills-inactive'),
+      }),
+      fetchFn: async () => new Response(Buffer.from(archive)),
+      createInstallId: () => 'install-marketplace-conflict',
+    })
+
+    const conflict = await installer.waitForInstall(installer.install({
+      workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0',
+    }).installId)
+
+    expect(conflict.errorCode).toBe('TARGET_CONFLICT')
+    expect(conflict.conflict).toEqual({
+      kind: 'different_marketplace',
+      identifier: 'deep-research',
+      location: 'enabled',
+      replaceable: false,
+      existingMarketplaceSkillId: 'another-skill',
+    })
+    expect(() => installer.confirmConflict(conflict.installId)).toThrow('该安装任务没有可确认的同名冲突')
+  })
+
+  test('Given 同名 Skill 属于另一个 marketplace ID When 请求更新 Then 拒绝跨来源替换', async () => {
+    const workspaceRoot = createTemporaryDirectory()
+    const skillsDirectory = join(workspaceRoot, 'skills')
+    const existingDirectory = join(skillsDirectory, 'deep-research')
+    const archive = createSkillArchive()
+    mkdirSync(existingDirectory, { recursive: true })
+    writeFileSync(join(existingDirectory, '.source.json'), JSON.stringify({
+      kind: 'marketplace',
+      marketplaceSkillId: 'another-skill',
+      identifier: 'deep-research',
+      installedVersion: '1.0.0',
+      contentHash: 'a'.repeat(64),
+      installedAt: '2026-07-18T00:00:00.000Z',
+    }), 'utf8')
+    writeFileSync(join(existingDirectory, 'existing.txt'), '另一个市场 Skill', 'utf8')
+    const installer = new MarketplaceInstaller({
+      catalogClient: { getInstallManifest: async () => manifestFor(archive) },
+      resolveWorkspaceDirectories: () => ({
+        skillsDirectory,
+        inactiveSkillsDirectory: join(workspaceRoot, 'skills-inactive'),
+      }),
+      fetchFn: async () => new Response(Buffer.from(archive)),
+      createInstallId: () => 'update-marketplace-mismatch',
+    })
+
+    const failed = await installer.waitForInstall(installer.update({
+      workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0',
+    }).installId)
+
+    expect(failed.phase).toBe('failed')
+    expect(failed.errorCode).toBe('UPDATE_SOURCE_MISMATCH')
+    expect(failed.error).toContain('不属于当前市场 Skill')
+    expect(readFileSync(join(existingDirectory, 'existing.txt'), 'utf8')).toBe('另一个市场 Skill')
+  })
+
   test('Given 合法已发布包 When 安装到真实工作区 Then 原子提交并记录 marketplace 来源', async () => {
     const workspaceRoot = createTemporaryDirectory()
     const skillsDirectory = join(workspaceRoot, 'skills')
@@ -121,6 +353,8 @@ describe('MarketplaceInstaller', () => {
 
     expect(completed.phase).toBe('failed')
     expect(completed.error).toBe('技能包 SHA-256 校验失败')
+    expect(completed.errorCode).toBe('VERIFY_HASH')
+    expect(completed.failedAt).toBe('verifying')
     expect(existsSync(join(skillsDirectory, 'deep-research'))).toBe(false)
     expect(existsSync(join(skillsDirectory, '.deep-research.install-bad-hash.staging'))).toBe(false)
     expect(existsSync(join(skillsDirectory, '.deep-research.install-bad-hash.zip'))).toBe(false)
@@ -179,6 +413,142 @@ describe('MarketplaceInstaller', () => {
     expect(completed.map((state) => state.phase)).toEqual(['completed', 'completed'])
   })
 
+  test('Given 下载遇到两次临时网络错误 When 第三次恢复 Then 有界重试后完成安装', async () => {
+    const root = createTemporaryDirectory()
+    const archive = createSkillArchive()
+    let requests = 0
+    const installer = new MarketplaceInstaller({
+      catalogClient: { getInstallManifest: async () => manifestFor(archive) },
+      resolveWorkspaceDirectories: () => ({
+        skillsDirectory: join(root, 'skills'), inactiveSkillsDirectory: join(root, 'skills-inactive'),
+      }),
+      fetchFn: async () => {
+        requests += 1
+        if (requests < 3) throw new TypeError('fetch failed')
+        return new Response(Buffer.from(archive))
+      },
+      createInstallId: () => 'install-network-retry',
+    })
+
+    const completed = await installer.waitForInstall(installer.install({
+      workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0',
+    }).installId)
+
+    expect(completed.phase).toBe('completed')
+    expect(requests).toBe(3)
+  })
+
+  test('Given Windows 提交遇到两次 EBUSY When 文件锁释放 Then 有界重试后原子安装', async () => {
+    const root = createTemporaryDirectory()
+    const archive = createSkillArchive()
+    let commitAttempts = 0
+    const installer = new MarketplaceInstaller({
+      catalogClient: { getInstallManifest: async () => manifestFor(archive) },
+      resolveWorkspaceDirectories: () => ({
+        skillsDirectory: join(root, 'skills'), inactiveSkillsDirectory: join(root, 'skills-inactive'),
+      }),
+      fetchFn: async () => new Response(Buffer.from(archive)),
+      createInstallId: () => 'install-file-retry',
+      platform: 'win32',
+      fileRetryDelay: async () => {},
+      fileOperations: {
+        rename: async (source, target) => {
+          if (source.endsWith('.staging') && ++commitAttempts < 3) throw fileSystemError('EBUSY')
+          await rename(source, target)
+        },
+        remove: rm,
+      },
+    })
+
+    const completed = await installer.waitForInstall(installer.install({
+      workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0',
+    }).installId)
+
+    expect(completed.phase).toBe('completed')
+    expect(commitAttempts).toBe(3)
+    expect(existsSync(join(root, 'skills', 'deep-research', 'SKILL.md'))).toBe(true)
+  })
+
+  test('Given 已确认替换且 Windows 文件锁重试耗尽 When 提交失败 Then 恢复旧 Skill 并清理临时目录', async () => {
+    const root = createTemporaryDirectory()
+    const skillsDirectory = join(root, 'skills')
+    const existingDirectory = join(skillsDirectory, 'deep-research')
+    const archive = createSkillArchive()
+    mkdirSync(existingDirectory, { recursive: true })
+    writeFileSync(join(existingDirectory, 'existing.txt'), '必须恢复的旧 Skill', 'utf8')
+    let stagingRenameAttempts = 0
+    const ids = ['install-retry-conflict', 'install-retry-confirmed']
+    const installer = new MarketplaceInstaller({
+      catalogClient: { getInstallManifest: async () => manifestFor(archive) },
+      resolveWorkspaceDirectories: () => ({
+        skillsDirectory, inactiveSkillsDirectory: join(root, 'skills-inactive'),
+      }),
+      fetchFn: async () => new Response(Buffer.from(archive)),
+      createInstallId: () => ids.shift()!,
+      platform: 'win32',
+      fileRetryDelay: async () => {},
+      fileOperations: {
+        rename: async (source, target) => {
+          if (source.endsWith('.staging')) {
+            stagingRenameAttempts += 1
+            throw fileSystemError('EBUSY')
+          }
+          await rename(source, target)
+        },
+        remove: rm,
+      },
+    })
+    const request = { workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0' }
+    const conflict = await installer.waitForInstall(installer.install(request).installId)
+
+    const confirmed = installer.confirmConflict(conflict.installId)
+    const failed = await installer.waitForInstall(confirmed.installId)
+
+    expect(failed.phase).toBe('failed')
+    expect(failed.errorCode).toBe('COMMIT_FAILED')
+    expect(stagingRenameAttempts).toBe(5)
+    expect(readFileSync(join(existingDirectory, 'existing.txt'), 'utf8')).toBe('必须恢复的旧 Skill')
+    expect(existsSync(join(existingDirectory, 'SKILL.md'))).toBe(false)
+    expect(readdirSync(skillsDirectory).filter((name) => name.startsWith('.deep-research.'))).toEqual([])
+  })
+
+  test('Given 新目录已提交但旧 backup 删除重试耗尽 When 替换失败 Then 回滚到旧 Skill', async () => {
+    const root = createTemporaryDirectory()
+    const skillsDirectory = join(root, 'skills')
+    const existingDirectory = join(skillsDirectory, 'deep-research')
+    const archive = createSkillArchive()
+    mkdirSync(existingDirectory, { recursive: true })
+    writeFileSync(join(existingDirectory, 'existing.txt'), '删除 backup 失败时必须恢复', 'utf8')
+    const ids = ['install-backup-conflict', 'install-backup-confirmed']
+    const installer = new MarketplaceInstaller({
+      catalogClient: { getInstallManifest: async () => manifestFor(archive) },
+      resolveWorkspaceDirectories: () => ({
+        skillsDirectory, inactiveSkillsDirectory: join(root, 'skills-inactive'),
+      }),
+      fetchFn: async () => new Response(Buffer.from(archive)),
+      createInstallId: () => ids.shift()!,
+      platform: 'win32',
+      fileRetryDelay: async () => {},
+      fileOperations: {
+        rename,
+        remove: async (target, options) => {
+          if (target.endsWith('.backup')) throw fileSystemError('EBUSY')
+          await rm(target, options)
+        },
+      },
+    })
+    const request = { workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0' }
+    const conflict = await installer.waitForInstall(installer.install(request).installId)
+
+    const confirmed = installer.confirmConflict(conflict.installId)
+    const failed = await installer.waitForInstall(confirmed.installId)
+
+    expect(failed.errorCode).toBe('COMMIT_FAILED')
+    expect(readFileSync(join(existingDirectory, 'existing.txt'), 'utf8')).toBe('删除 backup 失败时必须恢复')
+    expect(existsSync(join(existingDirectory, 'SKILL.md'))).toBe(false)
+    expect(readdirSync(skillsDirectory).filter((name) => name.startsWith('.deep-research.'))).toEqual([])
+  })
+
   test('Given 下载连续重定向超过三次 When 安装 Then 停止跟随并返回失败', async () => {
     const root = createTemporaryDirectory()
     const archive = createSkillArchive()
@@ -201,6 +571,8 @@ describe('MarketplaceInstaller', () => {
 
     expect(completed.phase).toBe('failed')
     expect(completed.error).toBe('技能包下载重定向超过 3 次')
+    expect(completed.errorCode).toBe('DOWNLOAD_REDIRECT')
+    expect(completed.failedAt).toBe('downloading')
     expect(requests).toBe(4)
   })
 
@@ -224,5 +596,29 @@ describe('MarketplaceInstaller', () => {
 
     expect(completed.phase).toBe('failed')
     expect(completed.error).toBe('技能包响应超过 20 MB')
+    expect(completed.errorCode).toBe('DOWNLOAD_TOO_LARGE')
+    expect(completed.failedAt).toBe('downloading')
+  })
+
+  test('Given 下载完成但磁盘写入失败 When 安装 Then 返回中文下载阶段错误', async () => {
+    const root = createTemporaryDirectory()
+    const archive = createSkillArchive()
+    const installer = new MarketplaceInstaller({
+      catalogClient: { getInstallManifest: async () => manifestFor(archive) },
+      resolveWorkspaceDirectories: () => ({
+        skillsDirectory: join(root, 'skills'), inactiveSkillsDirectory: join(root, 'skills-inactive'),
+      }),
+      fetchFn: async () => new Response(Buffer.from(archive)),
+      archiveWriter: async () => { throw fileSystemError('ENOSPC') },
+      createInstallId: () => 'install-disk-full',
+    })
+
+    const failed = await installer.waitForInstall(installer.install({
+      workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0',
+    }).installId)
+
+    expect(failed.errorCode).toBe('DOWNLOAD_WRITE_FAILED')
+    expect(failed.failedAt).toBe('downloading')
+    expect(failed.error).toContain('保存技能包失败')
   })
 })

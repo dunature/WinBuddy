@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { rename, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
 import type { MarketplaceInstallManifest } from '@proma/shared'
 import { createMarketplaceCatalogClient } from './marketplace-catalog-client'
-import { MarketplaceInstaller } from './marketplace-installer'
+import { MarketplaceInstaller, type MarketplaceInstallerOptions } from './marketplace-installer'
 
 const originalHome = process.env.HOME
 let temporaryHome: string | undefined
@@ -43,6 +44,7 @@ function replaceArchivePath(archive: Uint8Array, source: string, target: string)
 interface TestApiOptions {
   sha256?: string
   onDownload?: () => void
+  downloadResponse?: () => Response
 }
 
 function startTestApi(archive: Uint8Array, options: TestApiOptions = {}): string[] {
@@ -67,6 +69,7 @@ function startTestApi(archive: Uint8Array, options: TestApiOptions = {}): string
       }
       if (url.pathname === '/api/v1/marketplace/downloads/deep-research/1.2.0') {
         options.onDownload?.()
+        if (options.downloadResponse) return options.downloadResponse()
         return new Response(Buffer.from(archive), {
           headers: { 'content-length': String(archive.byteLength), 'content-type': 'application/zip' },
         })
@@ -80,7 +83,15 @@ function startTestApi(archive: Uint8Array, options: TestApiOptions = {}): string
   return requestedPaths
 }
 
-function createHttpInstaller(home: string, installId: string): {
+interface HttpInstallerOptions {
+  createInstallId?: () => string
+  onProgress?: MarketplaceInstallerOptions['onProgress']
+  platform?: MarketplaceInstallerOptions['platform']
+  fileRetryDelay?: MarketplaceInstallerOptions['fileRetryDelay']
+  fileOperations?: MarketplaceInstallerOptions['fileOperations']
+}
+
+function createHttpInstaller(home: string, installId: string, options: HttpInstallerOptions = {}): {
   installer: MarketplaceInstaller
   workspaceRoot: string
 } {
@@ -98,10 +109,18 @@ function createHttpInstaller(home: string, installId: string): {
         skillsDirectory: join(workspaceRoot, 'skills'),
         inactiveSkillsDirectory: join(workspaceRoot, 'skills-inactive'),
       }),
-      createInstallId: () => installId,
+      createInstallId: options.createInstallId ?? (() => installId),
       now: () => new Date('2026-07-18T06:00:00.000Z'),
+      ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+      ...(options.platform ? { platform: options.platform } : {}),
+      ...(options.fileRetryDelay ? { fileRetryDelay: options.fileRetryDelay } : {}),
+      ...(options.fileOperations ? { fileOperations: options.fileOperations } : {}),
     }),
   }
+}
+
+function fileSystemError(code: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(`测试文件系统错误: ${code}`), { code })
 }
 
 function createTemporaryHome(): string {
@@ -120,6 +139,93 @@ afterEach(() => {
 })
 
 describe('Marketplace 安装 HTTP 集成', () => {
+  test('Given 临时 HOME 的 HTTP 下载仍在进行 When 用户取消 Then 清理下载与 staging', async () => {
+    const home = createTemporaryHome()
+    const archive = createSkillArchive()
+    startTestApi(archive, {
+      downloadResponse: () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(archive.slice(0, 8))
+        },
+      })),
+    })
+    let notifyDownloading: (() => void) | undefined
+    const downloading = new Promise<void>((resolve) => { notifyDownloading = resolve })
+    const { installer, workspaceRoot } = createHttpInstaller(home, 'install-http-cancel', {
+      onProgress: (state) => {
+        if (state.phase === 'downloading') notifyDownloading?.()
+      },
+    })
+    const queued = installer.install({
+      workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0',
+    })
+    await downloading
+
+    expect(installer.cancel(queued.installId)).toBe(true)
+    const cancelled = await installer.waitForInstall(queued.installId)
+
+    expect(cancelled.phase).toBe('cancelled')
+    expect(existsSync(join(workspaceRoot, 'skills', 'deep-research'))).toBe(false)
+    expect(existsSync(join(workspaceRoot, 'skills', '.deep-research.install-http-cancel.staging'))).toBe(false)
+    expect(existsSync(join(workspaceRoot, 'skills', '.deep-research.install-http-cancel.zip'))).toBe(false)
+  })
+
+  test('Given 临时 HOME 存在同名本地 Skill When 拒绝后再确认 Then 通过原 installId 安全替换', async () => {
+    const home = createTemporaryHome()
+    const archive = createSkillArchive()
+    startTestApi(archive)
+    const workspaceRoot = join(home, '.proma', 'agent-workspaces', 'research')
+    const existingDirectory = join(workspaceRoot, 'skills', 'deep-research')
+    mkdirSync(existingDirectory, { recursive: true })
+    writeFileSync(join(existingDirectory, 'existing.txt'), '本地 Skill', 'utf8')
+    const ids = ['install-http-conflict', 'install-http-confirmed']
+    const { installer } = createHttpInstaller(home, '', { createInstallId: () => ids.shift()! })
+    const request = { workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0' }
+
+    const conflict = await installer.waitForInstall(installer.install(request).installId)
+    expect(conflict.conflict?.replaceable).toBe(true)
+    expect(readFileSync(join(existingDirectory, 'existing.txt'), 'utf8')).toBe('本地 Skill')
+
+    const confirmed = installer.confirmConflict(conflict.installId)
+    expect((await installer.waitForInstall(confirmed.installId)).phase).toBe('completed')
+    expect(existsSync(join(existingDirectory, 'existing.txt'))).toBe(false)
+    expect(readFileSync(join(existingDirectory, 'SKILL.md'), 'utf8')).toContain('# Deep Research')
+  })
+
+  test('Given Windows 文件锁重试耗尽 When HTTP 安装替换提交 Then 恢复旧目录并清理 backup', async () => {
+    const home = createTemporaryHome()
+    const archive = createSkillArchive()
+    startTestApi(archive)
+    const workspaceRoot = join(home, '.proma', 'agent-workspaces', 'research')
+    const skillsDirectory = join(workspaceRoot, 'skills')
+    const existingDirectory = join(skillsDirectory, 'deep-research')
+    mkdirSync(existingDirectory, { recursive: true })
+    writeFileSync(join(existingDirectory, 'existing.txt'), '必须保留', 'utf8')
+    const ids = ['install-http-lock-conflict', 'install-http-lock-confirmed']
+    const { installer } = createHttpInstaller(home, '', {
+      createInstallId: () => ids.shift()!,
+      platform: 'win32',
+      fileRetryDelay: async () => {},
+      fileOperations: {
+        rename: async (source, target) => {
+          if (source.endsWith('.staging')) throw fileSystemError('EBUSY')
+          await rename(source, target)
+        },
+        remove: rm,
+      },
+    })
+    const request = { workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0' }
+    const conflict = await installer.waitForInstall(installer.install(request).installId)
+
+    const confirmed = installer.confirmConflict(conflict.installId)
+    const failed = await installer.waitForInstall(confirmed.installId)
+
+    expect(failed.errorCode).toBe('COMMIT_FAILED')
+    expect(readFileSync(join(existingDirectory, 'existing.txt'), 'utf8')).toBe('必须保留')
+    expect(existsSync(join(existingDirectory, 'SKILL.md'))).toBe(false)
+    expect((await Array.fromAsync(new Bun.Glob('.deep-research.*').scan(skillsDirectory)))).toEqual([])
+  })
+
   test('Given 临时 HOME 与测试 API When 按市场 ID 安装 Then 经真实 manifest 和下载路由原子写入工作区', async () => {
     const home = createTemporaryHome()
     const archive = createSkillArchive()
