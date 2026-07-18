@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { createZipFixture } from '../../marketplace-api/tests/zip-fixture'
 
 test('Given 初始管理员 When 登录改密且会话到期 Then 管理路由完成保护与失效恢复', async ({ page }) => {
+  test.setTimeout(120_000)
   await page.goto('/agent/marketplace/admin')
 
   await expect(page.getByRole('heading', { name: '进入安全控制台' })).toBeVisible()
@@ -91,6 +92,7 @@ test('Given 初始管理员 When 登录改密且会话到期 Then 管理路由�
   await page.getByText('历史上传记录（1）').click()
   await page.getByText('校验失败', { exact: true }).click()
   await expect(page.getByText(/SKILL_MD_MISSING/)).toBeVisible()
+  await expect(page.getByText('created', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: '提交审核' }).click()
   await expect(page.getByText('pending_review', { exact: true })).toBeVisible()
@@ -132,17 +134,27 @@ test('Given 初始管理员 When 登录改密且会话到期 Then 管理路由�
   await page.getByLabel('选择版本 1.0.0').check()
   await page.getByLabel('选择版本 1.1.0').check()
   await page.getByLabel('批量治理原因').fill('批量维护验证')
+  let bulkAttempts = 0
+  await page.route('**/api/v1/admin/bulk-actions/unpublish', async (route) => {
+    bulkAttempts += 1
+    if (bulkAttempts === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'TEST_UNAVAILABLE', message: '测试批量服务不可用' }, requestId: 'bulk-error' }),
+      })
+      return
+    }
+    await route.continue()
+  })
   await page.getByRole('button', { name: '批量下架' }).click()
+  await expect(page.getByRole('alert')).toContainText('测试批量服务不可用')
+  await expect(page.getByText('已选择 2 项')).toBeVisible()
+  await page.getByRole('button', { name: '重试本次批量操作' }).click()
   await expect(page.getByText('成功 1 · 跳过 0 · 失败 1')).toBeVisible()
   await expect(page.getByText(/VERSION_ACTION_NOT_ALLOWED/)).toBeVisible()
-
-  const retryRequestPromise = page.waitForRequest((request) => request.url().includes('/bulk-actions/unpublish'))
-  await page.getByRole('button', { name: '仅重试失败项' }).click()
-  const retryRequest = await retryRequestPromise
-  const retryBody = retryRequest.postDataJSON() as { items: Array<{ key: string }> }
-  expect(retryBody.items).toHaveLength(1)
-  expect(retryBody.items[0]?.key).toContain('version:')
-  await expect(page.getByText('成功 0 · 跳过 0 · 失败 1')).toBeVisible()
+  await expect(page.getByRole('button', { name: '仅重试可重试项' })).toHaveCount(0)
+  await page.unroute('**/api/v1/admin/bulk-actions/unpublish')
   await page.getByRole('button', { name: '清空批量选择' }).click()
   await page.getByRole('button', { name: '重新发布' }).click()
 
@@ -161,6 +173,29 @@ test('Given 初始管理员 When 登录改密且会话到期 Then 管理路由�
   await governedVersion.getByRole('button', { name: '确认归档' }).click()
   await expect(governedVersion.getByText('archived', { exact: true })).toBeVisible()
 
+  await page.getByRole('button', { name: '审计日志' }).click()
+  await expect(page.getByRole('heading', { name: '审计日志' })).toBeVisible()
+  await page.getByLabel('按 Skill 筛选审计').selectOption({ label: '每日简报助手' })
+  await page.getByLabel('按管理员筛选审计').fill('admin')
+  await page.getByLabel('按动作筛选审计').fill('skill_version.archive')
+  await page.getByRole('button', { name: '查询审计' }).click()
+  await expect(page.getByText('skill_version.archive', { exact: true })).toBeVisible()
+  await expect(page.getByText('版本生命周期结束', { exact: true })).toBeVisible()
+
+  await page.route('**/api/v1/admin/audit-entries?**', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'TEST_UNAVAILABLE', message: '测试审计服务不可用' }, requestId: 'audit-error' }),
+    })
+  })
+  await page.getByRole('button', { name: '查询审计' }).click()
+  await expect(page.getByRole('alert')).toContainText('测试审计服务不可用')
+  await expect(page.getByLabel('按动作筛选审计')).toHaveValue('skill_version.archive')
+  await page.unroute('**/api/v1/admin/audit-entries?**')
+  await page.getByRole('button', { name: '重试' }).click()
+  await expect(page.getByText('skill_version.archive', { exact: true })).toBeVisible()
+
   await page.route('**/api/v1/admin/skills?**', async (route) => {
     await route.fulfill({
       status: 503,
@@ -176,7 +211,7 @@ test('Given 初始管理员 When 登录改密且会话到期 Then 管理路由�
   await expect(page.getByText('每日简报助手', { exact: true })).toBeVisible()
 
   await page.request.post('/__e2e__/expire-admin-sessions')
-  await page.reload()
+  await page.getByRole('button', { name: '审计日志' }).click()
   await expect(page).toHaveURL(/\/admin\/login$/)
   await expect(page.getByRole('alert')).toContainText('会话已失效，请重新登录')
 })
