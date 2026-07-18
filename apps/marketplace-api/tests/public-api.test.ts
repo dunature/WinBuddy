@@ -198,6 +198,8 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace public API（真实 PostgreSQL�
     const largeResponse = await app.request('/api/v1/marketplace/skills/deep-research/versions/1.2.0/file?path=references%2Flarge.md')
     const manifestResponse = await app.request('/api/v1/marketplace/skills/deep-research/versions/1.2.0/manifest')
     const manifest = await readJson<MarketplaceApiSuccess<MarketplaceInstallManifest>>(manifestResponse)
+    const stableIdManifestResponse = await app.request('/api/v1/marketplace/skills/by-id/skill-public/versions/1.2.0/manifest')
+    const stableIdManifest = await readJson<MarketplaceApiSuccess<MarketplaceInstallManifest>>(stableIdManifestResponse)
 
     expect(fileResponse.status).toBe(200)
     expect(file.data).toEqual({
@@ -220,6 +222,8 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace public API（真实 PostgreSQL�
       size: 42000,
       fileCount: 3,
     })
+    expect(stableIdManifestResponse.status).toBe(200)
+    expect(stableIdManifest.data).toEqual(manifest.data)
     expect(JSON.stringify(manifest)).not.toContain('/Users/')
     expect(JSON.stringify(manifest)).not.toContain('content')
   })

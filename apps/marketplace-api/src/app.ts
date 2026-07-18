@@ -26,6 +26,7 @@ import {
 } from './admin-auth'
 import {
   getPublicInstallManifest,
+  getPublicInstallManifestBySkillId,
   getPublicSkill,
   getPublicSkillFile,
   listPublicCategories,
@@ -330,6 +331,30 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
       page: result.page,
       requestId: context.get('requestId'),
     })
+  })
+
+  app.get('/api/v1/marketplace/skills/by-id/:skillId/versions/:version/manifest', async (context) => {
+    const manifest = await getPublicInstallManifestBySkillId(
+      options.database,
+      context.req.param('skillId'),
+      context.req.param('version'),
+      options.downloadSigningSecret
+        ? (identifier, version) => createMarketplaceDownloadUrl(
+            allowedOrigin,
+            options.downloadSigningSecret!,
+            identifier,
+            version,
+            now(),
+          )
+        : undefined,
+    )
+    if (!manifest) {
+      return context.json({
+        error: { code: 'VERSION_NOT_FOUND', message: '技能版本不存在' },
+        requestId: context.get('requestId'),
+      }, 404)
+    }
+    return context.json({ data: manifest, requestId: context.get('requestId') })
   })
 
   app.get('/api/v1/marketplace/skills/:identifier', async (context) => {
