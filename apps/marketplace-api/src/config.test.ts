@@ -14,6 +14,7 @@ describe('Marketplace API 配置', () => {
       MARKETPLACE_HOST: '0.0.0.0',
       MARKETPLACE_PORT: '4318',
       MARKETPLACE_WEB_DIR: '/tmp/marketplace-web',
+      MARKETPLACE_STORAGE_DIR: '/tmp/marketplace-storage',
       MARKETPLACE_ADMIN_USERNAME: 'market-admin',
       MARKETPLACE_ADMIN_INITIAL_PASSWORD: 'initial-password-123',
       MARKETPLACE_ALLOWED_ORIGIN: 'https://marketplace.example.com',
@@ -22,6 +23,7 @@ describe('Marketplace API 配置', () => {
       host: '0.0.0.0',
       port: 4318,
       webRoot: '/tmp/marketplace-web',
+      storageDir: '/tmp/marketplace-storage',
       adminUsername: 'market-admin',
       adminInitialPassword: 'initial-password-123',
       allowedOrigin: 'https://marketplace.example.com',
@@ -59,5 +61,10 @@ describe('Marketplace API 配置', () => {
       MARKETPLACE_ADMIN_INITIAL_PASSWORD: 'initial-password-123',
       MARKETPLACE_ALLOWED_ORIGIN: 'javascript:alert(1)',
     })).toThrow('MARKETPLACE_ALLOWED_ORIGIN 必须是 HTTP(S) Origin')
+    expect(() => loadMarketplaceConfig({
+      MARKETPLACE_DATABASE_URL: 'postgres://localhost/marketplace',
+      MARKETPLACE_ADMIN_USERNAME: 'admin',
+      MARKETPLACE_ADMIN_INITIAL_PASSWORD: 'initial-password-123',
+    })).toThrow('缺少 MARKETPLACE_STORAGE_DIR')
   })
 })

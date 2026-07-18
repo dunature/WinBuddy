@@ -160,6 +160,43 @@ export interface MarketplaceAdminSkillDetail extends MarketplaceAdminSkillSummar
   versions: MarketplaceAdminVersion[]
 }
 
+export type MarketplaceUploadStatus = 'queued' | 'running' | 'succeeded' | 'failed'
+
+export interface MarketplaceValidationCheck {
+  rule: string
+  passed: boolean
+  code: string
+  message: string
+  path?: string
+}
+
+export interface MarketplaceValidationReport {
+  id: string
+  passed: boolean
+  checks: MarketplaceValidationCheck[]
+  manifest: { identifier: string; description: string; version: string } | null
+  rootDirectory: string | null
+  fileCount: number
+  expandedSize: number
+  createdAt: string
+}
+
+export interface MarketplaceAdminUpload {
+  id: string
+  versionId: string
+  originalFilename: string
+  sha256: string
+  size: number
+  status: MarketplaceUploadStatus
+  attemptCount: number
+  lastError?: string
+  versionStatus: MarketplaceVersionStatus
+  versionRevision: number
+  createdAt: string
+  updatedAt: string
+  report: MarketplaceValidationReport | null
+}
+
 export const MARKETPLACE_IPC_CHANNELS = {
   LIST_CATEGORIES: 'marketplace:list-categories',
   LIST_SKILLS: 'marketplace:list-skills',

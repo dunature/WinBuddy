@@ -5,6 +5,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { MARKETPLACE_MAX_TEXT_PREVIEW_BYTES } from '@proma/marketplace-domain'
 import type { MarketplaceDatabase } from './database/client'
 import { createMarketplaceAdminDraftRouter } from './admin-draft-routes'
+import { createMarketplaceAdminUploadRouter } from './admin-upload-routes'
 import {
   ADMIN_CSRF_COOKIE,
   ADMIN_LOGIN_CSRF_COOKIE,
@@ -40,6 +41,7 @@ export interface CreateMarketplaceAppOptions {
   database: MarketplaceDatabase
   requestIdFactory?: () => string
   webRoot?: string
+  storageDir?: string
   allowedOrigin?: string
   now?: () => Date
   sessionDurationMs?: number
@@ -299,6 +301,9 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
   })
 
   app.route('/api/v1/admin', createMarketplaceAdminDraftRouter(options.database))
+  if (options.storageDir) {
+    app.route('/api/v1/admin', createMarketplaceAdminUploadRouter(options.database, options.storageDir))
+  }
 
   app.get('/api/v1/marketplace/categories', async (context) => context.json({
     data: await listPublicCategories(options.database),

@@ -1,15 +1,17 @@
 import * as React from 'react'
 import { GitBranchPlus, LoaderCircle, PackageOpen } from 'lucide-react'
-import type { MarketplaceAdminSkillDetail, MarketplaceAdminVersion } from '@proma/shared'
+import type { MarketplaceAdminSkillDetail, MarketplaceAdminUpload, MarketplaceAdminVersion } from '@proma/shared'
 import { createAdminVersion } from '../../admin-api'
+import { AdminVersionUploadPanel } from './AdminVersionUploadPanel'
 
 interface AdminVersionPanelProps {
   skill: MarketplaceAdminSkillDetail
   csrfToken: string
   onCreated(version: MarketplaceAdminVersion): void
+  onVersionChanged(upload: MarketplaceAdminUpload): void
 }
 
-export function AdminVersionPanel({ skill, csrfToken, onCreated }: AdminVersionPanelProps): React.ReactElement {
+export function AdminVersionPanel({ skill, csrfToken, onCreated, onVersionChanged }: AdminVersionPanelProps): React.ReactElement {
   const [creating, setCreating] = React.useState(false)
   const [version, setVersion] = React.useState('')
   const [changelog, setChangelog] = React.useState('')
@@ -67,13 +69,21 @@ export function AdminVersionPanel({ skill, csrfToken, onCreated }: AdminVersionP
         {skill.versions.length === 0 ? (
           <div className="rounded-[20px] bg-[#f2eee5] px-5 py-7 text-center text-sm text-[var(--muted)]">尚未创建候选版本</div>
         ) : skill.versions.map((item) => (
-          <article key={item.id} className="flex flex-wrap items-center gap-4 rounded-[20px] bg-[#f2eee5] px-5 py-4">
-            <div className="min-w-0 flex-1">
-              <div className="font-mono text-sm font-bold text-[var(--ink)]">{item.version}</div>
-              <div className="mt-1 truncate text-xs text-[var(--muted)]">{item.changelog || '暂无更新说明'}</div>
+          <article key={item.id} className="rounded-[20px] bg-[#f2eee5] px-5 py-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="min-w-0 flex-1">
+                <div className="font-mono text-sm font-bold text-[var(--ink)]">{item.version}</div>
+                <div className="mt-1 truncate text-xs text-[var(--muted)]">{item.changelog || '暂无更新说明'}</div>
+              </div>
+              <span className="admin-status-pill">{item.status}</span>
+              <span className="text-[10px] font-bold tracking-[0.12em] text-[var(--muted)]">R{item.revision}</span>
             </div>
-            <span className="admin-status-pill">{item.status}</span>
-            <span className="text-[10px] font-bold tracking-[0.12em] text-[var(--muted)]">R{item.revision}</span>
+            <AdminVersionUploadPanel
+              skillId={skill.id}
+              version={item}
+              csrfToken={csrfToken}
+              onVersionChanged={onVersionChanged}
+            />
           </article>
         ))}
       </div>

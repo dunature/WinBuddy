@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { createZipFixture } from '../../marketplace-api/tests/zip-fixture'
 
 test('Given 初始管理员 When 登录改密且会话到期 Then 管理路由完成保护与失效恢复', async ({ page }) => {
   await page.goto('/agent/marketplace/admin')
@@ -43,6 +44,33 @@ test('Given 初始管理员 When 登录改密且会话到期 Then 管理路由�
   await page.getByRole('button', { name: '保存候选版本' }).click()
   await expect(page.getByText('1.0.0', { exact: true })).toBeVisible()
   await expect(page.getByText('created', { exact: true })).toBeVisible()
+
+  const invalidZip = createZipFixture([{ path: 'daily-briefing/README.md', content: '# 缺少 SKILL.md\n' }])
+  await page.getByLabel('Skill ZIP 包 1.0.0').setInputFiles({
+    name: 'daily-briefing.zip',
+    mimeType: 'application/zip',
+    buffer: Buffer.from(invalidZip),
+  })
+  await page.getByRole('button', { name: '上传校验' }).click()
+  await expect(page.getByText('校验失败', { exact: true })).toBeVisible()
+  await expect(page.getByText(/SKILL_MD_MISSING/)).toBeVisible()
+
+  const validZip = createZipFixture([{
+    path: 'daily-briefing/SKILL.md',
+    content: '---\nname: daily-briefing\ndescription: 自动生成每日简报\nversion: 1.0.0\n---\n',
+  }])
+  await page.getByLabel('Skill ZIP 包 1.0.0').setInputFiles({
+    name: 'daily-briefing.zip',
+    mimeType: 'application/zip',
+    buffer: Buffer.from(validZip),
+  })
+  await page.getByRole('button', { name: '重新上传' }).click()
+  await expect(page.getByText('校验通过', { exact: true })).toBeVisible()
+  await expect(page.getByText(/SKILL_MANIFEST_OK/)).toBeVisible()
+  await expect(page.getByText('历史上传记录（1）')).toBeVisible()
+  await page.getByText('历史上传记录（1）').click()
+  await page.getByText('校验失败', { exact: true }).click()
+  await expect(page.getByText(/SKILL_MD_MISSING/)).toBeVisible()
 
   await page.route('**/api/v1/admin/skills?**', async (route) => {
     await route.fulfill({

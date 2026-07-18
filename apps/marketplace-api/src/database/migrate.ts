@@ -13,6 +13,10 @@ const migrations = [
     id: '0002_admin_drafts',
     file: new URL('../../migrations/0002_admin_drafts.sql', import.meta.url),
   },
+  {
+    id: '0003_package_uploads',
+    file: new URL('../../migrations/0003_package_uploads.sql', import.meta.url),
+  },
 ] as const
 
 export async function runMarketplaceMigrations(sql: Sql): Promise<void> {

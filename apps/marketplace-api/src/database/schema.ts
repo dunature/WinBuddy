@@ -86,3 +86,32 @@ export const auditEntries = pgTable('audit_entries', {
   reason: text('reason'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+export const uploads = pgTable('uploads', {
+  id: text('id').primaryKey(),
+  skillVersionId: text('skill_version_id').notNull().references(() => skillVersions.id),
+  originalFilename: text('original_filename').notNull(),
+  storageKey: text('storage_key').notNull().unique(),
+  sha256: text('sha256').notNull(),
+  size: integer('size').notNull(),
+  status: text('status').$type<'queued' | 'running' | 'succeeded' | 'failed'>().notNull(),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  createdBy: text('created_by').references(() => admins.id, { onDelete: 'set null' }),
+  lastError: text('last_error'),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const validationReports = pgTable('validation_reports', {
+  id: text('id').primaryKey(),
+  uploadId: text('upload_id').notNull().unique().references(() => uploads.id, { onDelete: 'cascade' }),
+  passed: boolean('passed').notNull(),
+  checks: jsonb('checks').notNull(),
+  manifest: jsonb('manifest'),
+  rootDirectory: text('root_directory'),
+  fileCount: integer('file_count').notNull(),
+  expandedSize: integer('expanded_size').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})

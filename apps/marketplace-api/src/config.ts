@@ -5,6 +5,7 @@ export interface MarketplaceConfig {
   host: string
   port: number
   webRoot: string
+  storageDir: string
   adminUsername: string
   adminInitialPassword: string
   allowedOrigin: string
@@ -60,11 +61,15 @@ export function loadMarketplaceConfig(env: Record<string, string | undefined> = 
     throw new Error('MARKETPLACE_ALLOWED_ORIGIN 必须是 HTTP(S) Origin')
   }
 
+  const storageDir = env.MARKETPLACE_STORAGE_DIR?.trim()
+  if (!storageDir) throw new Error('缺少 MARKETPLACE_STORAGE_DIR')
+
   return {
     databaseUrl,
     host: env.MARKETPLACE_HOST?.trim() || '127.0.0.1',
     port,
     webRoot: env.MARKETPLACE_WEB_DIR?.trim() || defaultWebRoot,
+    storageDir,
     adminUsername,
     adminInitialPassword,
     allowedOrigin: originUrl.origin,
