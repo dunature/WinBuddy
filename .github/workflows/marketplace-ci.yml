@@ -1,0 +1,145 @@
+name: Marketplace CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: PostgreSQL、全量测试与三端构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      MARKETPLACE_DATABASE_URL: postgres://postgres@127.0.0.1:5432/postgres
+      MARKETPLACE_TEST_ADMIN_DATABASE_URL: postgres://postgres@127.0.0.1:5432/postgres
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Bun 1.3.13
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+
+      - name: 冻结安装依赖
+        run: bun install --frozen-lockfile
+
+      - name: 安装 Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: 验证 PostgreSQL migration
+        run: bun run --filter='@proma/marketplace-api' db:migrate
+
+      - name: 运行全量测试
+        run: bun test --timeout 30000
+
+      - name: 运行全量类型检查
+        run: bun run typecheck
+
+      - name: 构建 Marketplace API 与 Web
+        run: |
+          bun run --filter='@proma/marketplace-api' build
+          bun run --filter='@proma/marketplace-web' build
+
+      - name: 构建 Electron main、preload 与 renderer
+        run: |
+          bun run --filter='@proma/electron' build:main
+          bun run --filter='@proma/electron' build:preload
+          bun run --filter='@proma/electron' build:renderer
+
+      - name: 验证公开市场与管理后台
+        working-directory: apps/marketplace-web
+        run: bunx playwright test --project=chromium
+
+      - name: 收集 PostgreSQL 诊断日志
+        if: failure()
+        run: |
+          mkdir -p output/ci
+          docker logs "${{ job.services.postgres.id }}" > output/ci/postgres.log 2>&1
+
+      - name: 上传失败诊断
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketplace-quality-diagnostics
+          path: |
+            output/ci/**
+            output/playwright/**
+          if-no-files-found: ignore
+          retention-days: 7
+
+  installer:
+    name: 安装器隔离验证 (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Bun 1.3.13
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+
+      - name: 冻结安装依赖
+        run: bun install --frozen-lockfile
+
+      - name: 隔离验证安装器纯文件系统行为
+        run: bun test apps/electron/src/main/lib/marketplace-installer.test.ts --timeout 30000
+
+      - name: 隔离验证临时 HOME 与真实 HTTP 下载
+        run: bun test apps/electron/src/main/lib/marketplace-installer.integration.test.ts --timeout 30000
+
+      - name: 隔离验证启停、卸载与 IPC 生命周期
+        run: bun test apps/electron/src/main/lib/marketplace-skill-lifecycle.test.ts apps/electron/src/main/lib/marketplace-skill-lifecycle-ipc.test.ts --timeout 30000
+
+      - name: 隔离验证 renderer 安装状态
+        run: bun test apps/electron/src/renderer/atoms/marketplace-atoms.test.ts apps/electron/src/renderer/components/marketplace/marketplace-agent-use.test.ts apps/electron/src/renderer/components/marketplace/MarketplaceSkillDetailPage.test.ts apps/electron/src/renderer/components/marketplace/MarketplaceUpdateSummary.test.tsx apps/electron/src/renderer/components/agent-skills/SkillCard.test.tsx --timeout 30000
+
+      - name: 类型检查共享契约与 Electron
+        run: bun run --filter='@proma/shared' typecheck && bun run --filter='@proma/electron' typecheck
+
+      - name: 构建 Electron main、preload 与 renderer
+        run: bun run --filter='@proma/electron' build:main && bun run --filter='@proma/electron' build:preload && bun run --filter='@proma/electron' build:renderer
+
+  required:
+    name: marketplace-required
+    if: always()
+    needs: [quality, installer]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 汇总强制门禁
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          INSTALLER_RESULT: ${{ needs.installer.result }}
+        run: |
+          if [[ "$QUALITY_RESULT" != "success" || "$INSTALLER_RESULT" != "success" ]]; then
+            echo "Marketplace 门禁未全部通过：quality=$QUALITY_RESULT, installer=$INSTALLER_RESULT"
+            exit 1
+          fi
+          echo "Marketplace 全部门禁已通过"
