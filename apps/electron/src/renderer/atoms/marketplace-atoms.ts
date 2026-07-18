@@ -73,6 +73,17 @@ export function withMarketplaceInstallState(
   return next
 }
 
+export const applyMarketplaceInstallProgressAtom = atom(
+  null,
+  (get, set, state: MarketplaceInstallState) => {
+    const previous = get(marketplaceInstallTasksAtom).get(state.installId)
+    set(marketplaceInstallTasksAtom, (tasks) => withMarketplaceInstallState(tasks, state))
+    if (state.phase === 'completed' && previous?.phase !== 'completed') {
+      set(workspaceCapabilitiesVersionAtom, get(workspaceCapabilitiesVersionAtom) + 1)
+    }
+  },
+)
+
 const marketplaceInstallPhaseLabels: Record<MarketplaceInstallState['phase'], string> = {
   queued: '等待安装',
   downloading: '正在下载',
@@ -84,8 +95,19 @@ const marketplaceInstallPhaseLabels: Record<MarketplaceInstallState['phase'], st
   cancelled: '已取消',
 }
 
-export function marketplaceInstallPhaseLabel(phase: MarketplaceInstallState['phase']): string {
-  return marketplaceInstallPhaseLabels[phase]
+const marketplaceUpdatePhaseLabels: Partial<Record<MarketplaceInstallState['phase'], string>> = {
+  queued: '等待更新',
+  completed: '更新完成',
+  failed: '更新失败',
+  cancelled: '更新已取消',
+}
+
+export function marketplaceInstallPhaseLabel(
+  phase: MarketplaceInstallState['phase'],
+  action: MarketplaceInstallState['action'] = 'install',
+): string {
+  const updateLabel = action === 'update' ? marketplaceUpdatePhaseLabels[phase] : undefined
+  return updateLabel ?? marketplaceInstallPhaseLabels[phase]
 }
 
 export function findMarketplaceInstallTask(

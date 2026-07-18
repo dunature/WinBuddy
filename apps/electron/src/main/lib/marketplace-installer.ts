@@ -1,8 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { MARKETPLACE_ZIP_LIMITS, isMarketplaceIdentifier, isMarketplaceSemVer } from '@proma/marketplace-domain'
+import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import {
+  MARKETPLACE_ZIP_LIMITS,
+  compareMarketplaceSemVer,
+  isMarketplaceIdentifier,
+  isMarketplaceSemVer,
+} from '@proma/marketplace-domain'
 import type {
   MarketplaceInstallAction,
   MarketplaceInstallConflict,
@@ -13,9 +18,15 @@ import type {
   MarketplaceInstallState,
   MarketplaceInstallStatus,
   MarketplaceSkillImportSource,
+  MarketplaceUpdateFileChange,
+  MarketplaceUpdatePreview,
 } from '@proma/shared'
 import type { MarketplaceCatalogClient } from './marketplace-catalog-client'
-import { extractMarketplaceArchive, inspectMarketplaceArchive } from './marketplace-archive'
+import {
+  extractMarketplaceArchive,
+  inspectMarketplaceArchive,
+  snapshotMarketplaceArchive,
+} from './marketplace-archive'
 
 interface WorkspaceDirectories {
   skillsDirectory: string
@@ -77,7 +88,10 @@ function errorMessage(error: unknown): string {
 
 async function readMarketplaceSkillId(skillDirectory: string): Promise<string | undefined> {
   try {
-    const value = JSON.parse(await readFile(join(skillDirectory, '.source.json'), 'utf8')) as unknown
+    const sourcePath = join(skillDirectory, '.source.json')
+    const sourceStat = await lstat(sourcePath)
+    if (!sourceStat.isFile() || sourceStat.isSymbolicLink()) return undefined
+    const value = JSON.parse(await readFile(sourcePath, 'utf8')) as unknown
     if (!value || typeof value !== 'object') return undefined
     const source = value as Record<string, unknown>
     return source.kind === 'marketplace' && typeof source.marketplaceSkillId === 'string'
@@ -86,6 +100,86 @@ async function readMarketplaceSkillId(skillDirectory: string): Promise<string | 
   } catch {
     return undefined
   }
+}
+
+async function readMarketplaceSource(skillDirectory: string): Promise<MarketplaceSkillImportSource | undefined> {
+  try {
+    const sourcePath = join(skillDirectory, '.source.json')
+    const sourceStat = await lstat(sourcePath)
+    if (!sourceStat.isFile() || sourceStat.isSymbolicLink()) return undefined
+    const value = JSON.parse(await readFile(sourcePath, 'utf8')) as unknown
+    if (!value || typeof value !== 'object') return undefined
+    const source = value as Record<string, unknown>
+    const fields = ['marketplaceSkillId', 'identifier', 'installedVersion', 'contentHash', 'installedAt'] as const
+    if (
+      source.kind !== 'marketplace'
+      || !fields.every((field) => typeof source[field] === 'string' && source[field].length > 0)
+    ) return undefined
+    return {
+      kind: 'marketplace',
+      marketplaceSkillId: source.marketplaceSkillId as string,
+      identifier: source.identifier as string,
+      installedVersion: source.installedVersion as string,
+      contentHash: source.contentHash as string,
+      installedAt: source.installedAt as string,
+    }
+  } catch {
+    return undefined
+  }
+}
+
+async function assertSafeWorkspaceSkillDirectory(directory: string): Promise<void> {
+  const directoryStat = await lstat(directory)
+  if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+    throw new Error('市场 Skill 目标目录无效')
+  }
+}
+
+interface MarketplaceFileSnapshot {
+  size: number
+  sha256: string
+}
+
+async function snapshotWorkspaceDirectory(
+  directory: string,
+  relativeDirectory = '',
+  snapshots = new Map<string, MarketplaceFileSnapshot>(),
+): Promise<Map<string, MarketplaceFileSnapshot>> {
+  const entries = await readdir(join(directory, relativeDirectory), { withFileTypes: true })
+  for (const entry of entries) {
+    const relativePath = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name
+    if (relativePath === '.source.json') continue
+    if (entry.isSymbolicLink()) throw new Error(`工作区 Skill 包含符号链接，无法安全更新: ${relativePath}`)
+    if (entry.isDirectory()) {
+      await snapshotWorkspaceDirectory(directory, relativePath, snapshots)
+      continue
+    }
+    if (!entry.isFile()) throw new Error(`工作区 Skill 包含不支持的文件类型: ${relativePath}`)
+    const content = await readFile(join(directory, ...relativePath.split('/')))
+    snapshots.set(relativePath, {
+      size: content.byteLength,
+      sha256: createHash('sha256').update(content).digest('hex'),
+    })
+  }
+  return snapshots
+}
+
+function diffMarketplaceFiles(
+  current: Map<string, MarketplaceFileSnapshot>,
+  target: Map<string, MarketplaceFileSnapshot>,
+): MarketplaceUpdateFileChange[] {
+  const paths = [...new Set([...current.keys(), ...target.keys()])].sort()
+  const changes: MarketplaceUpdateFileChange[] = []
+  for (const path of paths) {
+    const before = current.get(path)
+    const after = target.get(path)
+    if (!before && after) changes.push({ path, kind: 'added', afterSize: after.size })
+    else if (before && !after) changes.push({ path, kind: 'removed', beforeSize: before.size })
+    else if (before && after && before.sha256 !== after.sha256) {
+      changes.push({ path, kind: 'modified', beforeSize: before.size, afterSize: after.size })
+    }
+  }
+  return changes
 }
 
 async function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
@@ -232,6 +326,87 @@ export class MarketplaceInstaller {
 
   update(request: MarketplaceInstallRequest): MarketplaceInstallState {
     return this.start('update', request)
+  }
+
+  async previewUpdate(request: MarketplaceInstallRequest): Promise<MarketplaceUpdatePreview> {
+    if (!request.workspaceSlug.trim() || !request.marketplaceSkillId.trim() || !isMarketplaceSemVer(request.version)) {
+      throw new Error('更新预览请求参数无效')
+    }
+    const manifest = await this.options.catalogClient.getInstallManifest(request.marketplaceSkillId, request.version)
+    this.assertManifest(manifest, request.marketplaceSkillId, request.version)
+    const { skillsDirectory, inactiveSkillsDirectory } = this.options.resolveWorkspaceDirectories(request.workspaceSlug)
+    const enabledDirectory = join(skillsDirectory, manifest.identifier)
+    const disabledDirectory = join(inactiveSkillsDirectory, manifest.identifier)
+    const installedDirectory = existsSync(enabledDirectory)
+      ? enabledDirectory
+      : existsSync(disabledDirectory)
+        ? disabledDirectory
+        : undefined
+    if (installedDirectory) await assertSafeWorkspaceSkillDirectory(installedDirectory)
+    const source = installedDirectory ? await readMarketplaceSource(installedDirectory) : undefined
+    if (
+      !installedDirectory
+      || !source
+      || source.marketplaceSkillId !== request.marketplaceSkillId
+      || source.identifier !== manifest.identifier
+    ) {
+      throw new MarketplaceInstallerError(
+        'UPDATE_SOURCE_MISMATCH',
+        `同名 Skill 不属于当前市场 Skill，无法预览更新: ${manifest.identifier}`,
+      )
+    }
+    if (compareMarketplaceSemVer(manifest.version, source.installedVersion) <= 0) {
+      throw new MarketplaceInstallerError(
+        'UPDATE_VERSION_NOT_NEWER',
+        `目标版本必须高于已安装版本: ${source.installedVersion} → ${manifest.version}`,
+      )
+    }
+
+    const previewId = this.createInstallId()
+    const archivePath = join(dirname(installedDirectory), `.${manifest.identifier}.${previewId}.preview.zip`)
+    const timeoutController = new AbortController()
+    const timeoutId = setTimeout(() => timeoutController.abort(), 60_000)
+    try {
+      const archive = await downloadPackage(
+        manifest.downloadUrl!,
+        archivePath,
+        this.fetchFn,
+        this.archiveWriter,
+        timeoutController.signal,
+      )
+      if (archive.byteLength !== manifest.size) {
+        throw new MarketplaceInstallerError('VERIFY_SIZE', '技能包大小与 manifest 不一致')
+      }
+      const actualHash = createHash('sha256').update(archive).digest('hex')
+      if (actualHash !== manifest.sha256.replace(/^sha256:/, '').toLocaleLowerCase('en-US')) {
+        throw new MarketplaceInstallerError('VERIFY_HASH', '技能包 SHA-256 校验失败')
+      }
+      const validation = await inspectMarketplaceArchive(
+        archivePath,
+        manifest.identifier,
+        manifest.version,
+        timeoutController.signal,
+      )
+      if (!validation.passed) {
+        const firstFailure = validation.checks.find((check) => !check.passed)
+        throw new MarketplaceInstallerError('VERIFY_ARCHIVE', firstFailure?.message ?? '技能包安全校验失败')
+      }
+      const currentFiles = await snapshotWorkspaceDirectory(installedDirectory)
+      const targetFiles = new Map(
+        (await snapshotMarketplaceArchive(archivePath, manifest.identifier, timeoutController.signal))
+          .map((file) => [file.path, { size: file.size, sha256: file.sha256 }]),
+      )
+      return {
+        ...request,
+        identifier: manifest.identifier,
+        installedVersion: source.installedVersion,
+        targetVersion: manifest.version,
+        changes: diffMarketplaceFiles(currentFiles, targetFiles),
+      }
+    } finally {
+      clearTimeout(timeoutId)
+      await this.removeWithRetry(archivePath, { force: true })
+    }
   }
 
   confirmConflict(installId: string): MarketplaceInstallState {
@@ -403,19 +578,27 @@ export class MarketplaceInstaller {
       : existsSync(inactiveTargetDirectory)
         ? inactiveTargetDirectory
         : undefined
+    if (existingDirectory) await assertSafeWorkspaceSkillDirectory(existingDirectory)
     if (initialState.action === 'update') {
-      const existingMarketplaceSkillId = existingDirectory
-        ? await readMarketplaceSkillId(existingDirectory)
+      const existingSource = existingDirectory
+        ? await readMarketplaceSource(existingDirectory)
         : undefined
-      if (existingMarketplaceSkillId !== marketplaceSkillId) {
+      if (
+        existingSource?.marketplaceSkillId !== marketplaceSkillId
+        || existingSource.identifier !== manifest.identifier
+      ) {
         throw new MarketplaceInstallerError(
           'UPDATE_SOURCE_MISMATCH',
           `同名 Skill 不属于当前市场 Skill，无法更新: ${manifest.identifier}`,
         )
       }
-      throw new Error('技能市场更新将在后续版本开放')
-    }
-    if (existingDirectory) {
+      if (compareMarketplaceSemVer(manifest.version, existingSource.installedVersion) <= 0) {
+        throw new MarketplaceInstallerError(
+          'UPDATE_VERSION_NOT_NEWER',
+          `目标版本必须高于已安装版本: ${existingSource.installedVersion} → ${manifest.version}`,
+        )
+      }
+    } else if (existingDirectory) {
       const existingMarketplaceSkillId = await readMarketplaceSkillId(existingDirectory)
       if (existingMarketplaceSkillId === marketplaceSkillId) {
         throw new MarketplaceInstallerError('ALREADY_INSTALLED', `当前工作区已安装该市场 Skill: ${manifest.identifier}`)
@@ -447,11 +630,14 @@ export class MarketplaceInstaller {
     } else if (confirmedConflict) {
       throw new MarketplaceInstallerError('CONFLICT_STALE', '同名冲突目标已经变化，请重新安装并确认')
     }
-    const stagingDirectory = join(skillsDirectory, `.${manifest.identifier}.${installId}.staging`)
-    const archivePath = join(skillsDirectory, `.${manifest.identifier}.${installId}.zip`)
-    const replacementDirectory = confirmedConflict
-      ? confirmedConflict.location === 'enabled' ? targetDirectory : inactiveTargetDirectory
-      : undefined
+    const replacementDirectory = initialState.action === 'update'
+      ? existingDirectory
+      : confirmedConflict
+        ? confirmedConflict.location === 'enabled' ? targetDirectory : inactiveTargetDirectory
+        : undefined
+    const workingDirectory = replacementDirectory ? dirname(replacementDirectory) : skillsDirectory
+    const stagingDirectory = join(workingDirectory, `.${manifest.identifier}.${installId}.staging`)
+    const archivePath = join(workingDirectory, `.${manifest.identifier}.${installId}.zip`)
     const finalDirectory = replacementDirectory ?? targetDirectory
     const backupDirectory = replacementDirectory
       ? join(replacementDirectory, '..', `.${manifest.identifier}.${installId}.backup`)

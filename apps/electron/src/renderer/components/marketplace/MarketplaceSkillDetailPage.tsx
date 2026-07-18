@@ -1,8 +1,12 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { ArrowLeft, Bot, File, Folder, Power, ShieldCheck, Star, Trash2 } from 'lucide-react'
+import { ArrowLeft, Bot, File, Folder, Power, RefreshCw, ShieldCheck, Star, Trash2 } from 'lucide-react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
-import type { MarketplaceFileNode, MarketplaceInstalledSkill } from '@proma/shared'
+import type {
+  MarketplaceFileNode,
+  MarketplaceInstalledSkill,
+  MarketplaceUpdatePreview,
+} from '@proma/shared'
 import {
   findMarketplaceInstallTask,
   marketplaceInstallPhaseLabel,
@@ -36,6 +40,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { MarketplaceMarkdown } from './MarketplaceMarkdown'
 import { MarketplaceVersionHistory } from './MarketplaceVersionHistory'
+import { MarketplaceUpdateSummary } from './MarketplaceUpdateSummary'
 import { prefillMarketplaceSkillDraftAtom, selectMarketplaceAgentSession } from './marketplace-agent-use'
 import { useCreateSession } from '@/hooks/useCreateSession'
 import { useOpenSession } from '@/hooks/useOpenSession'
@@ -116,11 +121,15 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
   const openSession = useOpenSession()
   const [installError, setInstallError] = React.useState<string | null>(null)
   const [lifecycleError, setLifecycleError] = React.useState<string | null>(null)
-  const [lifecycleAction, setLifecycleAction] = React.useState<'toggle' | 'uninstall' | 'agent' | null>(null)
+  const [lifecycleAction, setLifecycleAction] = React.useState<
+    'toggle' | 'uninstall' | 'agent' | 'preview-update' | 'update' | null
+  >(null)
   const [dismissedConflictId, setDismissedConflictId] = React.useState<string | null>(null)
   const [confirmingConflict, setConfirmingConflict] = React.useState(false)
   const [uninstallDialogOpen, setUninstallDialogOpen] = React.useState(false)
   const [installedSkill, setInstalledSkill] = React.useState<MarketplaceInstalledSkill | null>(null)
+  const [updateDialogOpen, setUpdateDialogOpen] = React.useState(false)
+  const [updatePreview, setUpdatePreview] = React.useState<MarketplaceUpdatePreview | null>(null)
   const route = React.useMemo(() => readMarketplaceDetailRoute(searchParams), [searchParams])
   const detail = state.selectedIdentifier === identifier ? state.selectedSkill : null
   const latest = detail?.versions.find((version) => version.version === detail.latestVersion)
@@ -260,6 +269,45 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
     }).catch((error: unknown) => setInstallError(errorMessage(error)))
   }, [currentWorkspace, detail])
 
+  const previewUpdate = React.useCallback(async () => {
+    if (!detail || !currentWorkspace || !installedSkill || installedCurrentVersion || lifecycleAction) return
+    setLifecycleAction('preview-update')
+    setLifecycleError(null)
+    setUpdatePreview(null)
+    try {
+      const preview = await window.electronAPI.previewMarketplaceUpdate({
+        workspaceSlug: currentWorkspace.slug,
+        marketplaceSkillId: detail.id,
+        version: detail.latestVersion,
+      })
+      setUpdatePreview(preview)
+      setUpdateDialogOpen(true)
+    } catch (error) {
+      setLifecycleError(error instanceof Error ? error.message : '无法生成更新预览')
+    } finally {
+      setLifecycleAction(null)
+    }
+  }, [currentWorkspace, detail, installedCurrentVersion, installedSkill, lifecycleAction])
+
+  const confirmUpdate = React.useCallback(async () => {
+    if (!currentWorkspace || !detail || !updatePreview || lifecycleAction) return
+    setLifecycleAction('update')
+    setLifecycleError(null)
+    try {
+      await window.electronAPI.updateMarketplaceSkill({
+        workspaceSlug: currentWorkspace.slug,
+        marketplaceSkillId: detail.id,
+        version: updatePreview.targetVersion,
+      })
+      setUpdateDialogOpen(false)
+      setUpdatePreview(null)
+    } catch (error) {
+      setLifecycleError(error instanceof Error ? error.message : '启动市场 Skill 更新失败')
+    } finally {
+      setLifecycleAction(null)
+    }
+  }, [currentWorkspace, detail, lifecycleAction, updatePreview])
+
   const handleInstallAction = React.useCallback(() => {
     if (replaceableConflict) {
       setDismissedConflictId(null)
@@ -398,18 +446,27 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
                   )}
                   <button
                     type="button"
-                    disabled={!currentWorkspace || Boolean(installedSkill) || Boolean(installActive)}
-                    onClick={handleInstallAction}
+                    disabled={
+                      !currentWorkspace
+                      || Boolean(installActive)
+                      || Boolean(lifecycleAction)
+                      || Boolean(installedSkill && installedCurrentVersion)
+                    }
+                    onClick={installedSkill && !installedCurrentVersion
+                      ? () => void previewUpdate()
+                      : handleInstallAction}
                     className="rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
                   >
                     {!currentWorkspace
                       ? '请先选择工作区'
-                      : installedSkill || installTask?.phase === 'completed'
-                        ? installedSkill && !installedCurrentVersion
-                          ? `已安装 v${installedSkill.installedVersion}`
-                          : '已安装'
-                        : installActive
-                          ? `${marketplaceInstallPhaseLabel(installTask.phase)}…`
+                      : installActive
+                          ? `${marketplaceInstallPhaseLabel(installTask.phase, installTask.action)}…`
+                        : lifecycleAction === 'preview-update'
+                          ? '正在分析更新…'
+                          : installedSkill && !installedCurrentVersion
+                            ? `更新到 v${detail.latestVersion}`
+                            : installedSkill || installTask?.phase === 'completed'
+                              ? '已安装'
                           : replaceableConflict
                             ? '处理同名冲突'
                             : installTask?.phase === 'failed'
@@ -421,10 +478,10 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
               {installTask && installTask.phase !== 'completed' && (
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/55 px-4 py-3 text-sm">
                   <div>
-                    <span className="font-medium">{marketplaceInstallPhaseLabel(installTask.phase)}</span>
+                    <span className="font-medium">{marketplaceInstallPhaseLabel(installTask.phase, installTask.action)}</span>
                     {installTask.phase === 'failed' && installTask.failedAt && (
                       <span className="ml-2 text-muted-foreground">
-                        失败阶段：{marketplaceInstallPhaseLabel(installTask.failedAt)}
+                        失败阶段：{marketplaceInstallPhaseLabel(installTask.failedAt, installTask.action)}
                       </span>
                     )}
                     {installTask.phase === 'committing' && (
@@ -608,6 +665,43 @@ export function MarketplaceSkillDetailPage(): React.ReactElement {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {lifecycleAction === 'uninstall' ? '正在卸载…' : '确认卸载'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        open={updateDialogOpen}
+        onOpenChange={(open) => {
+          if (lifecycleAction !== 'update') setUpdateDialogOpen(open)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <RefreshCw size={17} /> 确认更新市场 Skill
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              文件差异由主进程下载并安全校验目标包后，与当前工作区真实内容计算得出。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {updatePreview && (
+            <MarketplaceUpdateSummary preview={updatePreview} changelog={latest?.changelog ?? ''} />
+          )}
+          {lifecycleError && (
+            <div className="rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {lifecycleError}
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={lifecycleAction === 'update'}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!updatePreview || lifecycleAction === 'update'}
+              onClick={(event) => {
+                event.preventDefault()
+                void confirmUpdate()
+              }}
+            >
+              {lifecycleAction === 'update' ? '正在启动更新…' : '确认更新'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

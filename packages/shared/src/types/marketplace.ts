@@ -111,6 +111,7 @@ export type MarketplaceInstallErrorCode =
   | 'CONFLICT_STALE'
   | 'ALREADY_INSTALLED'
   | 'UPDATE_SOURCE_MISMATCH'
+  | 'UPDATE_VERSION_NOT_NEWER'
   | 'DOWNLOAD_NETWORK'
   | 'DOWNLOAD_TIMEOUT'
   | 'DOWNLOAD_HTTP'
@@ -295,6 +296,22 @@ export interface MarketplaceToggleInstalledSkillRequest extends MarketplaceInsta
   enabled: boolean
 }
 
+export type MarketplaceUpdateFileChangeKind = 'added' | 'modified' | 'removed'
+
+export interface MarketplaceUpdateFileChange {
+  path: string
+  kind: MarketplaceUpdateFileChangeKind
+  beforeSize?: number
+  afterSize?: number
+}
+
+export interface MarketplaceUpdatePreview extends MarketplaceInstallRequest {
+  identifier: string
+  installedVersion: string
+  targetVersion: string
+  changes: MarketplaceUpdateFileChange[]
+}
+
 export const MARKETPLACE_IPC_CHANNELS = {
   LIST_CATEGORIES: 'marketplace:list-categories',
   LIST_SKILLS: 'marketplace:list-skills',
@@ -304,6 +321,7 @@ export const MARKETPLACE_IPC_CHANNELS = {
   GET_INSTALL: 'marketplace:get-install',
   GET_INSTALL_STATUS: 'marketplace:get-install-status',
   INSTALL: 'marketplace:install',
+  PREVIEW_UPDATE: 'marketplace:preview-update',
   UPDATE: 'marketplace:update',
   CONFIRM_CONFLICT: 'marketplace:confirm-conflict',
   CANCEL: 'marketplace:cancel',

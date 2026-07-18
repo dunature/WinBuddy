@@ -415,6 +415,59 @@ export function isMarketplaceSemVer(value: string): boolean {
   return true
 }
 
+interface ParsedMarketplaceSemVer {
+  core: [bigint, bigint, bigint]
+  prerelease: string[] | null
+}
+
+function parseMarketplaceSemVer(value: string): ParsedMarketplaceSemVer {
+  if (!isMarketplaceSemVer(value)) throw new Error(`无效的 SemVer: ${value}`)
+  const withoutBuild = value.split('+', 1)[0] ?? value
+  const prereleaseSeparator = withoutBuild.indexOf('-')
+  const core = (prereleaseSeparator === -1
+    ? withoutBuild
+    : withoutBuild.slice(0, prereleaseSeparator))
+    .split('.')
+    .map((part) => BigInt(part)) as [bigint, bigint, bigint]
+  const prerelease = prereleaseSeparator === -1
+    ? null
+    : withoutBuild.slice(prereleaseSeparator + 1).split('.')
+  return { core, prerelease }
+}
+
+/** 按 SemVer 2.0.0 precedence 比较，build metadata 不参与排序。 */
+export function compareMarketplaceSemVer(left: string, right: string): -1 | 0 | 1 {
+  const leftVersion = parseMarketplaceSemVer(left)
+  const rightVersion = parseMarketplaceSemVer(right)
+  const corePairs: Array<readonly [bigint, bigint]> = [
+    [leftVersion.core[0], rightVersion.core[0]],
+    [leftVersion.core[1], rightVersion.core[1]],
+    [leftVersion.core[2], rightVersion.core[2]],
+  ]
+  for (const [leftPart, rightPart] of corePairs) {
+    if (leftPart > rightPart) return 1
+    if (leftPart < rightPart) return -1
+  }
+  if (leftVersion.prerelease === null && rightVersion.prerelease === null) return 0
+  if (leftVersion.prerelease === null) return 1
+  if (rightVersion.prerelease === null) return -1
+  const length = Math.max(leftVersion.prerelease.length, rightVersion.prerelease.length)
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = leftVersion.prerelease[index]
+    const rightPart = rightVersion.prerelease[index]
+    if (leftPart === undefined) return -1
+    if (rightPart === undefined) return 1
+    if (leftPart === rightPart) continue
+    const leftNumeric = /^\d+$/.test(leftPart)
+    const rightNumeric = /^\d+$/.test(rightPart)
+    if (leftNumeric && rightNumeric) return BigInt(leftPart) < BigInt(rightPart) ? -1 : 1
+    if (leftNumeric) return -1
+    if (rightNumeric) return 1
+    return leftPart < rightPart ? -1 : 1
+  }
+  return 0
+}
+
 export function createMarketplaceDraftSkillState(): MarketplaceDraftSkillState {
   return { status: 'draft', currentPublishedVersionId: null }
 }

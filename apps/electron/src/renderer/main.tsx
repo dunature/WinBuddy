@@ -44,7 +44,7 @@ import {
 } from './atoms/agent-atoms'
 import { updateStatusAtom, initializeUpdater } from './atoms/updater'
 import { automationsAtom } from './atoms/automation-atoms'
-import { marketplaceInstallTasksAtom, withMarketplaceInstallState } from './atoms/marketplace-atoms'
+import { applyMarketplaceInstallProgressAtom, marketplaceInstallTasksAtom } from './atoms/marketplace-atoms'
 import {
   notificationsEnabledAtom,
   notificationSoundEnabledAtom,
@@ -496,11 +496,7 @@ function MarketplaceInstallInitializer(): null {
       .catch((error: unknown) => console.error('[技能市场] 加载安装任务失败:', error))
 
     const unsubscribe = window.electronAPI.onMarketplaceInstallProgress((state) => {
-      const previous = store.get(marketplaceInstallTasksAtom).get(state.installId)
-      store.set(marketplaceInstallTasksAtom, (tasks) => withMarketplaceInstallState(tasks, state))
-      if (state.phase === 'completed' && previous?.phase !== 'completed') {
-        store.set(workspaceCapabilitiesVersionAtom, (version) => version + 1)
-      }
+      store.set(applyMarketplaceInstallProgressAtom, state)
     })
     return () => {
       mounted = false

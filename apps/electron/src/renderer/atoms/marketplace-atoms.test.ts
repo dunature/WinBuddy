@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { createStore } from 'jotai/vanilla'
 import {
+  applyMarketplaceInstallProgressAtom,
   findMarketplaceInstallTask,
   initialMarketplaceState,
   marketplaceInstallPhaseLabel,
+  marketplaceInstallTasksAtom,
   notifyMarketplaceWorkspaceChangedAtom,
   toMarketplaceListQuery,
   withMarketplaceInstallState,
@@ -91,6 +93,15 @@ test('Given 固定安装阶段 When 显示进度 Then 每个阶段都有中文�
   ])
 })
 
+test('Given 更新任务 When 显示终态进度 Then 使用更新语义而不是安装语义', () => {
+  expect([
+    marketplaceInstallPhaseLabel('queued', 'update'),
+    marketplaceInstallPhaseLabel('completed', 'update'),
+    marketplaceInstallPhaseLabel('failed', 'update'),
+    marketplaceInstallPhaseLabel('cancelled', 'update'),
+  ]).toEqual(['等待更新', '更新完成', '更新失败', '更新已取消'])
+})
+
 test('Given 市场 Skill 生命周期成功 When 通知工作区变化 Then 递增能力版本', () => {
   const store = createStore()
   store.set(workspaceCapabilitiesVersionAtom, 4)
@@ -98,4 +109,22 @@ test('Given 市场 Skill 生命周期成功 When 通知工作区变化 Then 递�
   store.set(notifyMarketplaceWorkspaceChangedAtom)
 
   expect(store.get(workspaceCapabilitiesVersionAtom)).toBe(5)
+})
+
+test('Given 市场 Skill 更新完成 When 全局进度重复到达 Then 只刷新一次工作区能力', () => {
+  const store = createStore()
+  const downloading: MarketplaceInstallState = {
+    installId: 'update-1', action: 'update', phase: 'downloading', workspaceSlug: 'research',
+    marketplaceSkillId: 'skill-1', version: '1.2.0', createdAt: '2026-07-18T00:00:00.000Z', updatedAt: '2026-07-18T00:00:01.000Z',
+  }
+  const completed: MarketplaceInstallState = {
+    ...downloading, phase: 'completed', updatedAt: '2026-07-18T00:00:02.000Z',
+  }
+
+  store.set(applyMarketplaceInstallProgressAtom, downloading)
+  store.set(applyMarketplaceInstallProgressAtom, completed)
+  store.set(applyMarketplaceInstallProgressAtom, completed)
+
+  expect(store.get(marketplaceInstallTasksAtom).get('update-1')?.phase).toBe('completed')
+  expect(store.get(workspaceCapabilitiesVersionAtom)).toBe(1)
 })
