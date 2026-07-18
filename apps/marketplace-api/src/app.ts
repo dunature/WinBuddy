@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 import { Hono, type Context } from 'hono'
 import { serveStatic } from 'hono/bun'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { MARKETPLACE_MAX_TEXT_PREVIEW_BYTES } from '@proma/marketplace-domain'
 import type { MarketplaceDatabase } from './database/client'
 import { createMarketplaceAdminDraftRouter } from './admin-draft-routes'
+import { createMarketplaceAdminPublishRouter } from './admin-publish-routes'
 import { createMarketplaceAdminUploadRouter } from './admin-upload-routes'
 import {
   ADMIN_CSRF_COOKIE,
@@ -29,6 +31,7 @@ import {
   listPublicCategories,
   listPublicSkills,
 } from './public-catalog'
+import { createMarketplaceDownloadUrl, validateMarketplaceDownloadUrl } from './download-signing'
 
 export interface MarketplaceAppEnv {
   Variables: {
@@ -42,6 +45,7 @@ export interface CreateMarketplaceAppOptions {
   requestIdFactory?: () => string
   webRoot?: string
   storageDir?: string
+  downloadSigningSecret?: string
   allowedOrigin?: string
   now?: () => Date
   sessionDurationMs?: number
@@ -80,6 +84,7 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
   const allowedOrigin = options.allowedOrigin ?? 'https://www.feiyangclaw.com'
   const sessionDurationMs = options.sessionDurationMs ?? ADMIN_SESSION_DURATION_MS
   const sessionMaxAge = Math.floor(sessionDurationMs / 1000)
+  const now = options.now ?? (() => new Date())
 
   app.use('*', async (context, next) => {
     const requestId = requestIdFactory()
@@ -303,6 +308,7 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
   app.route('/api/v1/admin', createMarketplaceAdminDraftRouter(options.database))
   if (options.storageDir) {
     app.route('/api/v1/admin', createMarketplaceAdminUploadRouter(options.database, options.storageDir))
+    app.route('/api/v1/admin', createMarketplaceAdminPublishRouter(options.database, options.storageDir))
   }
 
   app.get('/api/v1/marketplace/categories', async (context) => context.json({
@@ -383,6 +389,15 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
       options.database,
       context.req.param('identifier'),
       context.req.param('version'),
+      options.downloadSigningSecret
+        ? (identifier, version) => createMarketplaceDownloadUrl(
+            allowedOrigin,
+            options.downloadSigningSecret!,
+            identifier,
+            version,
+            now(),
+          )
+        : undefined,
     )
     if (!manifest) {
       return context.json({
@@ -391,6 +406,57 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
       }, 404)
     }
     return context.json({ data: manifest, requestId: context.get('requestId') })
+  })
+
+  app.get('/api/v1/marketplace/downloads/:identifier/:version', async (context) => {
+    if (!options.storageDir || !options.downloadSigningSecret) {
+      return context.json({
+        error: { code: 'DOWNLOAD_UNAVAILABLE', message: '技能包下载暂不可用' },
+        requestId: context.get('requestId'),
+      }, 503)
+    }
+    const identifier = context.req.param('identifier')
+    const version = context.req.param('version')
+    const validationError = validateMarketplaceDownloadUrl(
+      options.downloadSigningSecret,
+      identifier,
+      version,
+      context.req.query('expires'),
+      context.req.query('signature'),
+      now(),
+    )
+    if (validationError) {
+      return context.json({
+        error: {
+          code: validationError,
+          message: validationError === 'DOWNLOAD_URL_EXPIRED' ? '下载地址已过期' : '下载签名无效',
+        },
+        requestId: context.get('requestId'),
+      }, 403)
+    }
+    const manifest = await getPublicInstallManifest(options.database, identifier, version)
+    if (!manifest) {
+      return context.json({
+        error: { code: 'VERSION_NOT_FOUND', message: '技能版本不存在' },
+        requestId: context.get('requestId'),
+      }, 404)
+    }
+    const archive = Bun.file(join(options.storageDir, 'published', identifier, version, 'package.zip'))
+    if (!await archive.exists()) {
+      return context.json({
+        error: { code: 'PACKAGE_NOT_FOUND', message: '已发布技能包不存在' },
+        requestId: context.get('requestId'),
+      }, 404)
+    }
+    return new Response(archive, {
+      headers: {
+        'content-type': 'application/zip',
+        'content-length': String(archive.size),
+        'content-disposition': `attachment; filename="${identifier}-${version}.zip"`,
+        'cache-control': 'private, no-store',
+        'x-request-id': context.get('requestId'),
+      },
+    })
   })
 
   app.notFound((context) => context.json({

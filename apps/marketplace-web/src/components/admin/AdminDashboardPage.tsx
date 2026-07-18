@@ -213,6 +213,7 @@ export function AdminDashboardPage(): React.ReactElement {
                       csrfToken={csrfToken}
                       onCreated={versionCreated}
                       onVersionChanged={versionChanged}
+                      onActionCompleted={saved}
                     />
                   )}
                 </>

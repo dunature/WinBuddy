@@ -3,15 +3,17 @@ import { GitBranchPlus, LoaderCircle, PackageOpen } from 'lucide-react'
 import type { MarketplaceAdminSkillDetail, MarketplaceAdminUpload, MarketplaceAdminVersion } from '@proma/shared'
 import { createAdminVersion } from '../../admin-api'
 import { AdminVersionUploadPanel } from './AdminVersionUploadPanel'
+import { AdminVersionActions } from './AdminVersionActions'
 
 interface AdminVersionPanelProps {
   skill: MarketplaceAdminSkillDetail
   csrfToken: string
   onCreated(version: MarketplaceAdminVersion): void
   onVersionChanged(upload: MarketplaceAdminUpload): void
+  onActionCompleted(skill: MarketplaceAdminSkillDetail): void
 }
 
-export function AdminVersionPanel({ skill, csrfToken, onCreated, onVersionChanged }: AdminVersionPanelProps): React.ReactElement {
+export function AdminVersionPanel({ skill, csrfToken, onCreated, onVersionChanged, onActionCompleted }: AdminVersionPanelProps): React.ReactElement {
   const [creating, setCreating] = React.useState(false)
   const [version, setVersion] = React.useState('')
   const [changelog, setChangelog] = React.useState('')
@@ -83,6 +85,12 @@ export function AdminVersionPanel({ skill, csrfToken, onCreated, onVersionChange
               version={item}
               csrfToken={csrfToken}
               onVersionChanged={onVersionChanged}
+            />
+            <AdminVersionActions
+              skillId={skill.id}
+              version={item}
+              csrfToken={csrfToken}
+              onCompleted={onActionCompleted}
             />
           </article>
         ))}

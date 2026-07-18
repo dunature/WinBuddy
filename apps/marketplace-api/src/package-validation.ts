@@ -1,4 +1,5 @@
-import { stat } from 'node:fs/promises'
+import { mkdir, stat, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { openPromise, type Entry } from 'yauzl'
 import {
   MARKETPLACE_MAX_TEXT_PREVIEW_BYTES,
@@ -145,4 +146,66 @@ export async function inspectMarketplaceZipPackage(
     expectedIdentifier,
     expectedVersion,
   })
+}
+
+export interface ExtractedMarketplaceFile {
+  path: string
+  size: number
+  isText: boolean
+  content?: string
+}
+
+function textPreview(content: Buffer): string | undefined {
+  if (content.byteLength > MARKETPLACE_MAX_TEXT_PREVIEW_BYTES) return undefined
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(content)
+  } catch {
+    return undefined
+  }
+}
+
+export async function extractMarketplaceZipPackage(
+  archivePath: string,
+  expectedIdentifier: string,
+  targetDirectory: string,
+): Promise<ExtractedMarketplaceFile[]> {
+  const files: ExtractedMarketplaceFile[] = []
+  const prefix = `${expectedIdentifier}/`
+  const zipFile = await openPromise(archivePath, {
+    autoClose: false,
+    strictFileNames: true,
+    validateEntrySizes: true,
+  })
+  try {
+    for await (const entry of zipFile.eachEntry()) {
+      if (marketplaceEntryKind(entry) !== 'file') continue
+      const normalized = entry.fileName.replaceAll('\\', '/')
+      if (!normalized.startsWith(prefix)) throw new Error('ZIP 根目录与 Skill identifier 不一致')
+      const relativePath = normalized.slice(prefix.length)
+      if (!relativePath) continue
+      const stream = await zipFile.openReadStreamPromise(entry)
+      const chunks: Buffer[] = []
+      let size = 0
+      for await (const chunk of stream) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array)
+        size += buffer.byteLength
+        if (size > MARKETPLACE_ZIP_LIMITS.singleFileBytes) throw new Error('解压文件超过单文件限制')
+        chunks.push(buffer)
+      }
+      const content = Buffer.concat(chunks)
+      const destination = join(targetDirectory, ...relativePath.split('/'))
+      await mkdir(dirname(destination), { recursive: true })
+      await writeFile(destination, content)
+      const preview = textPreview(content)
+      files.push({
+        path: relativePath,
+        size,
+        isText: preview !== undefined,
+        ...(preview !== undefined ? { content: preview } : {}),
+      })
+    }
+  } finally {
+    zipFile.close()
+  }
+  return files
 }

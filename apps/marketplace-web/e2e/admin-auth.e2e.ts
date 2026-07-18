@@ -20,7 +20,7 @@ test('Given 初始管理员 When 登录改密且会话到期 Then 管理路由�
   await expect(page.getByRole('heading', { name: 'Skill 草稿', exact: true })).toBeVisible()
   await expect(page.getByText('admin', { exact: true })).toBeVisible()
 
-  await expect(page.getByText('还没有 Skill 草稿')).toBeVisible()
+  await expect(page.getByText('深度研究助手', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '新建 Skill' }).click()
   await page.getByLabel('Identifier').fill('daily-briefing')
   await page.getByLabel('Skill 名称').fill('每日工作简报')
@@ -71,6 +71,21 @@ test('Given 初始管理员 When 登录改密且会话到期 Then 管理路由�
   await page.getByText('历史上传记录（1）').click()
   await page.getByText('校验失败', { exact: true }).click()
   await expect(page.getByText(/SKILL_MD_MISSING/)).toBeVisible()
+
+  await page.getByRole('button', { name: '提交审核' }).click()
+  await expect(page.getByText('pending_review', { exact: true })).toBeVisible()
+  await expect(page.getByText('已提交审核', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '批准版本' }).click()
+  await expect(page.getByText('approved', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '发布上线' }).click()
+  await expect(page.getByText('published', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('版本已发布，公开市场现已可见')).toBeVisible()
+
+  await page.goto('/agent/marketplace/skills/daily-briefing')
+  await expect(page.getByRole('heading', { name: '每日简报助手' })).toBeVisible()
+  await expect(page.getByText('最新 v1.0.0', { exact: true })).toBeVisible()
+  await page.goto('/agent/marketplace/admin')
+  await expect(page.getByText('每日简报助手', { exact: true })).toBeVisible()
 
   await page.route('**/api/v1/admin/skills?**', async (route) => {
     await route.fulfill({

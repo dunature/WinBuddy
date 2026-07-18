@@ -9,6 +9,7 @@ export interface MarketplaceConfig {
   adminUsername: string
   adminInitialPassword: string
   allowedOrigin: string
+  downloadSigningSecret: string
 }
 
 const defaultWebRoot = fileURLToPath(new URL('../../marketplace-web/dist', import.meta.url))
@@ -63,6 +64,10 @@ export function loadMarketplaceConfig(env: Record<string, string | undefined> = 
 
   const storageDir = env.MARKETPLACE_STORAGE_DIR?.trim()
   if (!storageDir) throw new Error('缺少 MARKETPLACE_STORAGE_DIR')
+  const downloadSigningSecret = env.MARKETPLACE_DOWNLOAD_SIGNING_SECRET ?? ''
+  if (downloadSigningSecret.length < 32) {
+    throw new Error('MARKETPLACE_DOWNLOAD_SIGNING_SECRET 至少需要 32 个字符')
+  }
 
   return {
     databaseUrl,
@@ -73,5 +78,6 @@ export function loadMarketplaceConfig(env: Record<string, string | undefined> = 
     adminUsername,
     adminInitialPassword,
     allowedOrigin: originUrl.origin,
+    downloadSigningSecret,
   }
 }
