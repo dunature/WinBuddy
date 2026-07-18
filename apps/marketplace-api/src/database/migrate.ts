@@ -21,6 +21,10 @@ const migrations = [
     id: '0004_version_governance',
     file: new URL('../../migrations/0004_version_governance.sql', import.meta.url),
   },
+  {
+    id: '0005_taxonomy',
+    file: new URL('../../migrations/0005_taxonomy.sql', import.meta.url),
+  },
 ] as const
 
 export async function runMarketplaceMigrations(sql: Sql): Promise<void> {

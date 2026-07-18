@@ -44,7 +44,8 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 草稿管理 API（真实 Postgr
       requestId: 'drafts-bootstrap',
     })
     await database.sql`
-      INSERT INTO categories (id, name, icon) VALUES ('automation', '效率自动化', 'workflow')
+      INSERT INTO categories (id, name, normalized_name, icon)
+      VALUES ('automation', '效率自动化', '效率自动化', 'workflow')
     `
     app = createMarketplaceApp({ database, allowedOrigin })
 

@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ilike, inArray, isNotNull, or, type SQL } from 'drizzle-orm'
+import { and, count, desc, eq, ilike, inArray, isNotNull, or, sql, type SQL } from 'drizzle-orm'
 import { buildMarketplaceFileTree, normalizeMarketplacePagination } from '@proma/marketplace-domain'
 import type {
   MarketplaceCategory,
@@ -38,8 +38,29 @@ function publicSkillConditions(query: Partial<MarketplaceListQuery>): SQL[] {
     if (search) conditions.push(search)
   }
   if (query.category) conditions.push(eq(skills.categoryId, query.category))
+  if (query.tag) {
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM skill_tags WHERE skill_tags.skill_id = ${skills.id} AND skill_tags.tag_id = ${query.tag}
+    )`)
+  }
   if (query.featured === true) conditions.push(eq(skills.featured, true))
   return conditions
+}
+
+async function tagNamesBySkill(
+  database: MarketplaceDatabase,
+  skillIds: string[],
+): Promise<Map<string, string[]>> {
+  if (skillIds.length === 0) return new Map()
+  const rows = await database.sql<{ skill_id: string; name: string }[]>`
+    SELECT skill_tags.skill_id, tags.name FROM skill_tags
+    INNER JOIN tags ON tags.id = skill_tags.tag_id
+    WHERE skill_tags.skill_id = ANY(${skillIds})
+    ORDER BY skill_tags.skill_id, tags.normalized_name, tags.id
+  `
+  const result = new Map<string, string[]>()
+  for (const row of rows) result.set(row.skill_id, [...(result.get(row.skill_id) ?? []), row.name])
+  return result
 }
 
 export async function listPublicCategories(database: MarketplaceDatabase): Promise<MarketplaceCategory[]> {
@@ -68,8 +89,8 @@ export async function listPublicSkills(
         name: skills.name,
         tagline: skills.tagline,
         authorName: skills.authorName,
-        category: skills.categoryId,
-        tags: skills.tags,
+        category: sql<string>`${skills.categoryId}`,
+        legacyTags: skills.tags,
         icon: skills.icon,
         featured: skills.featured,
         installs: skills.installs,
@@ -90,9 +111,11 @@ export async function listPublicSkills(
   ])
 
   const total = totals[0]?.total ?? 0
+  const tagNames = await tagNamesBySkill(database, rows.map((row) => row.id))
   return {
-    items: rows.map((row) => ({
+    items: rows.map(({ legacyTags, ...row }) => ({
       ...row,
+      tags: tagNames.get(row.id) ?? legacyTags,
       updatedAt: row.updatedAt?.toISOString() ?? '',
     })),
     page: {
@@ -157,8 +180,8 @@ export async function getPublicSkill(
       description: skills.description,
       authorName: skills.authorName,
       authorUrl: skills.authorUrl,
-      category: skills.categoryId,
-      tags: skills.tags,
+      category: sql<string>`${skills.categoryId}`,
+      legacyTags: skills.tags,
       icon: skills.icon,
       featured: skills.featured,
       installs: skills.installs,
@@ -176,6 +199,7 @@ export async function getPublicSkill(
 
   const row = rows[0]
   if (!row) return null
+  const tagNames = await tagNamesBySkill(database, [row.id])
   return {
     id: row.id,
     identifier: row.identifier,
@@ -185,7 +209,7 @@ export async function getPublicSkill(
     authorName: row.authorName,
     ...(row.authorUrl ? { authorUrl: row.authorUrl } : {}),
     category: row.category,
-    tags: row.tags,
+    tags: tagNames.get(row.id) ?? row.legacyTags,
     icon: row.icon,
     featured: row.featured,
     installs: row.installs,
