@@ -97,6 +97,8 @@ export const auditEntries = pgTable('audit_entries', {
   actorIdentifier: text('actor_identifier'),
   action: text('action').notNull(),
   requestId: text('request_id').notNull(),
+  skillId: text('skill_id'),
+  versionId: text('version_id'),
   ipAddress: text('ip_address'),
   beforeState: jsonb('before_state'),
   afterState: jsonb('after_state'),

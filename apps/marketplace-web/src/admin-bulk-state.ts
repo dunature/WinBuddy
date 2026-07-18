@@ -26,6 +26,8 @@ export function updateBulkSelection(
   return next
 }
 
-export function failedBulkTargets(result: MarketplaceBulkGovernanceResult): MarketplaceBulkGovernanceTarget[] {
-  return result.failed.map(({ outcome: _outcome, code: _code, message: _message, ...target }) => target)
+export function retryableBulkTargets(result: MarketplaceBulkGovernanceResult): MarketplaceBulkGovernanceTarget[] {
+  return result.failed
+    .filter((item) => item.retryable)
+    .map(({ outcome: _outcome, code: _code, message: _message, retryable: _retryable, ...target }) => target)
 }

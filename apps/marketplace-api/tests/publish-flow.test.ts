@@ -257,18 +257,21 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 审核发布黄金路径（真�
       action: string
       actor_identifier: string
       request_id: string
+      skill_id: string
+      version_id: string
       before_state: { status: string }
       after_state: { status: string; changed: boolean }
       reason: string
     }[]>`
-      SELECT action, actor_identifier, request_id, before_state, after_state, reason
+      SELECT action, actor_identifier, request_id, skill_id, version_id, before_state, after_state, reason
       FROM audit_entries
       WHERE action IN ('skill_version.submit_review', 'skill_version.approve', 'skill_version.publish')
-        AND after_state->>'versionId' = ${candidate.versionId}
+        AND version_id = ${candidate.versionId}
       ORDER BY created_at, id
     `
     expect(audits.filter((entry) => entry.action.includes('submit_review'))).toHaveLength(2)
     expect(audits.every((entry) => entry.actor_identifier === 'admin'
+      && entry.skill_id === candidate.skillId && entry.version_id === candidate.versionId
       && Boolean(entry.request_id) && Boolean(entry.before_state) && Boolean(entry.after_state) && Boolean(entry.reason))).toBe(true)
   })
 
@@ -595,11 +598,13 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 审核发布黄金路径（真�
       action: string
       request_id: string
       actor_identifier: string
+      skill_id: string
+      version_id: string | null
       before_state: Record<string, unknown>
       after_state: Record<string, unknown>
       reason: string
     }[]>`
-      SELECT action, request_id, actor_identifier, before_state, after_state, reason
+      SELECT action, request_id, actor_identifier, skill_id, version_id, before_state, after_state, reason
       FROM audit_entries WHERE action LIKE 'bulk.%'
     `
     expect(audits).toHaveLength(9)
@@ -607,5 +612,6 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 审核发布黄金路径（真�
     expect(audits.every((entry) => entry.actor_identifier === 'admin'
       && Boolean(entry.before_state.key) && Boolean(entry.after_state.outcome)
       && entry.reason.startsWith('批量测试'))).toBe(true)
+    expect(audits.every((entry) => Boolean(entry.skill_id))).toBe(true)
   })
 })

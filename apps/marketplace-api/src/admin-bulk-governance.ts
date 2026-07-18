@@ -26,8 +26,9 @@ function itemResult(
   outcome: MarketplaceBulkGovernanceItemResult['outcome'],
   code: string,
   message: string,
+  retryable = false,
 ): MarketplaceBulkGovernanceItemResult {
-  return { ...target, outcome, code, message }
+  return { ...target, outcome, code, message, retryable }
 }
 
 async function auditOutcome(
@@ -38,10 +39,11 @@ async function auditOutcome(
 ): Promise<void> {
   await database.sql`
     INSERT INTO audit_entries (
-      id, actor_id, actor_identifier, action, request_id, before_state, after_state, reason
+      id, actor_id, actor_identifier, action, request_id, skill_id, version_id,
+      before_state, after_state, reason
     ) VALUES (
       ${randomUUID()}, ${context.actor.adminId}, ${context.actor.username},
-      ${`bulk.${action}.${result.outcome}`}, ${context.requestId},
+      ${`bulk.${action}.${result.outcome}`}, ${context.requestId}, ${result.skillId}, ${result.versionId ?? null},
       ${JSON.stringify({ key: result.key, skillId: result.skillId, versionId: result.versionId ?? null })}::jsonb,
       ${JSON.stringify(result)}::jsonb, ${context.reason}
     )
@@ -56,7 +58,7 @@ function failureResult(
     return itemResult(target, 'failed', error.code, error.message)
   }
   console.error('[技能市场批量治理] 条目执行失败:', error)
-  return itemResult(target, 'failed', 'BULK_ITEM_INTERNAL_ERROR', '条目执行失败，请稍后重试')
+  return itemResult(target, 'failed', 'BULK_ITEM_INTERNAL_ERROR', '条目执行失败，请稍后重试', true)
 }
 
 async function performVersionItem(

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { MarketplaceBulkGovernanceResult } from '@proma/shared'
-import { failedBulkTargets, updateBulkSelection } from './admin-bulk-state'
+import { retryableBulkTargets, updateBulkSelection } from './admin-bulk-state'
 
 test('Given 多项已选择 When 切换单项 Then 返回新 Map 且不修改原选择', () => {
   const initial = new Map([['skill:a', { key: 'skill:a', skillId: 'a', revision: 1 }]])
@@ -12,12 +12,15 @@ test('Given 多项已选择 When 切换单项 Then 返回新 Map 且不修改原
   expect([...removed.keys()]).toEqual(['version:b'])
 })
 
-test('Given 批量结果部分失败 When 构造重试目标 Then 只保留 failed 子集', () => {
+test('Given 批量结果包含确定性失败 When 构造重试目标 Then 只保留可重试失败子集', () => {
   const result: MarketplaceBulkGovernanceResult = {
     action: 'unpublish',
-    succeeded: [{ key: 'a', skillId: 'a', versionId: 'v-a', outcome: 'succeeded', code: 'OK', message: 'ok' }],
+    succeeded: [{ key: 'a', skillId: 'a', versionId: 'v-a', outcome: 'succeeded', code: 'OK', message: 'ok', retryable: false }],
     skipped: [],
-    failed: [{ key: 'b', skillId: 'b', versionId: 'v-b', outcome: 'failed', code: 'BAD', message: 'bad' }],
+    failed: [
+      { key: 'b', skillId: 'b', versionId: 'v-b', outcome: 'failed', code: 'TRANSIENT', message: 'retry', retryable: true },
+      { key: 'c', skillId: 'c', versionId: 'v-c', outcome: 'failed', code: 'INVALID_STATE', message: 'stop', retryable: false },
+    ],
   }
-  expect(failedBulkTargets(result)).toEqual([{ key: 'b', skillId: 'b', versionId: 'v-b' }])
+  expect(retryableBulkTargets(result)).toEqual([{ key: 'b', skillId: 'b', versionId: 'v-b' }])
 })

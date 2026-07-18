@@ -151,10 +151,11 @@ async function insertActionAudit(
   }
   await sql`
     INSERT INTO audit_entries (
-      id, actor_id, actor_identifier, action, request_id, before_state, after_state, reason
+      id, actor_id, actor_identifier, action, request_id, skill_id, version_id,
+      before_state, after_state, reason
     ) VALUES (
       ${randomUUID()}, ${context.actor.adminId}, ${context.actor.username},
-      ${`skill_version.${action}`}, ${context.requestId},
+      ${`skill_version.${action}`}, ${context.requestId}, ${row.skill_id}, ${row.version_id},
       ${JSON.stringify(beforeState)}::jsonb,
       ${JSON.stringify(afterState)}::jsonb,
       ${context.reason || `${actionLabel(action)}${after.changed ? '' : '（幂等重试）'}`}

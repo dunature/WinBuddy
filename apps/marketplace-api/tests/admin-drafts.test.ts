@@ -259,8 +259,20 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 草稿管理 API（真实 Postgr
     const storedVersions = await database.sql<{ id: string }[]>`
       SELECT id FROM skill_versions WHERE skill_id = ${skillId}
     `
-    const audits = await database.sql<{ action: string; request_id: string }[]>`
-      SELECT action, request_id FROM audit_entries WHERE action LIKE 'skill%'
+    const audits = await database.sql<{
+      action: string
+      actor_identifier: string
+      request_id: string
+      skill_id: string
+      version_id: string | null
+      before_state: object | null
+      after_state: object | null
+      reason: string
+      created_at: Date | string
+    }[]>`
+      SELECT action, actor_identifier, request_id, skill_id, version_id,
+        before_state, after_state, reason, created_at
+      FROM audit_entries WHERE action LIKE 'skill%'
     `
     expect(storedSkills).toHaveLength(1)
     expect(storedSkills[0]).toMatchObject({ revision: 3 })
@@ -273,6 +285,11 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 草稿管理 API（真实 Postgr
       'skill_version.created',
       'skill_version.updated',
     ])
-    expect(audits.every((entry) => entry.request_id.length > 0)).toBe(true)
+    expect(audits.every((entry) => entry.actor_identifier === 'admin'
+      && entry.request_id.length > 0 && entry.skill_id === skillId
+      && Boolean(entry.before_state || entry.after_state) && Boolean(entry.reason)
+      && !Number.isNaN(new Date(entry.created_at).getTime()))).toBe(true)
+    expect(audits.filter((entry) => entry.action.startsWith('skill_version.'))
+      .every((entry) => entry.version_id === versionId)).toBe(true)
   })
 })

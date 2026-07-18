@@ -224,12 +224,24 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 分类标签管理 API（真实 
       method: 'DELETE', headers: writeHeaders, body: JSON.stringify({ revision: tag.revision }),
     })).status).toBe(200)
 
-    const audits = await database.sql<{ action: string }[]>`
-      SELECT action FROM audit_entries WHERE action LIKE 'category.%' OR action LIKE 'tag.%'
+    const audits = await database.sql<{
+      action: string
+      actor_identifier: string
+      request_id: string
+      before_state: object | null
+      after_state: object | null
+      reason: string
+      created_at: Date | string
+    }[]>`
+      SELECT action, actor_identifier, request_id, before_state, after_state, reason, created_at
+      FROM audit_entries WHERE action LIKE 'category.%' OR action LIKE 'tag.%'
     `
     expect(audits.map((entry) => entry.action).sort()).toEqual([
       'category.created', 'category.created', 'category.deleted',
       'tag.created', 'tag.created', 'tag.deleted', 'tag.updated',
     ])
+    expect(audits.every((entry) => entry.actor_identifier === 'admin'
+      && Boolean(entry.request_id) && Boolean(entry.before_state || entry.after_state)
+      && Boolean(entry.reason) && !Number.isNaN(new Date(entry.created_at).getTime()))).toBe(true)
   })
 })
