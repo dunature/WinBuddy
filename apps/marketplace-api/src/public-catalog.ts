@@ -207,7 +207,7 @@ interface PublicVersionRecord {
 
 async function getPublicVersionRecord(
   database: MarketplaceDatabase,
-  identifier: string,
+  selector: { identifier: string } | { skillId: string },
   version: string,
 ): Promise<PublicVersionRecord | null> {
   const rows = await database.db
@@ -223,7 +223,7 @@ async function getPublicVersionRecord(
     .from(skills)
     .innerJoin(skillVersions, eq(skillVersions.skillId, skills.id))
     .where(and(
-      eq(skills.identifier, identifier),
+      'identifier' in selector ? eq(skills.identifier, selector.identifier) : eq(skills.id, selector.skillId),
       eq(skills.status, 'published'),
       isNotNull(skills.currentPublishedVersionId),
       eq(skillVersions.version, version),
@@ -240,7 +240,7 @@ export async function getPublicSkillFile(
   version: string,
   path: string,
 ): Promise<MarketplaceSkillFile | null> {
-  const versionRecord = await getPublicVersionRecord(database, identifier, version)
+  const versionRecord = await getPublicVersionRecord(database, { identifier }, version)
   if (!versionRecord) return null
   const rows = await database.db
     .select({ path: versionFiles.path, size: versionFiles.size, isText: versionFiles.isText, content: versionFiles.content })
@@ -263,8 +263,29 @@ export async function getPublicInstallManifest(
   version: string,
   downloadUrlFactory?: (identifier: string, version: string) => string,
 ): Promise<MarketplaceInstallManifest | null> {
-  const versionRecord = await getPublicVersionRecord(database, identifier, version)
-  if (!versionRecord) return null
+  const versionRecord = await getPublicVersionRecord(database, { identifier }, version)
+  return versionRecord
+    ? buildPublicInstallManifest(database, versionRecord, downloadUrlFactory)
+    : null
+}
+
+export async function getPublicInstallManifestBySkillId(
+  database: MarketplaceDatabase,
+  skillId: string,
+  version: string,
+  downloadUrlFactory?: (identifier: string, version: string) => string,
+): Promise<MarketplaceInstallManifest | null> {
+  const versionRecord = await getPublicVersionRecord(database, { skillId }, version)
+  return versionRecord
+    ? buildPublicInstallManifest(database, versionRecord, downloadUrlFactory)
+    : null
+}
+
+async function buildPublicInstallManifest(
+  database: MarketplaceDatabase,
+  versionRecord: PublicVersionRecord,
+  downloadUrlFactory?: (identifier: string, version: string) => string,
+): Promise<MarketplaceInstallManifest> {
   const files = await database.db
     .select({ path: versionFiles.path, size: versionFiles.size })
     .from(versionFiles)
@@ -277,6 +298,8 @@ export async function getPublicInstallManifest(
     size: versionRecord.size,
     fileCount: versionRecord.fileCount,
     files: buildMarketplaceFileTree(files),
-    ...(downloadUrlFactory ? { downloadUrl: downloadUrlFactory(identifier, version) } : {}),
+    ...(downloadUrlFactory
+      ? { downloadUrl: downloadUrlFactory(versionRecord.identifier, versionRecord.version) }
+      : {}),
   }
 }

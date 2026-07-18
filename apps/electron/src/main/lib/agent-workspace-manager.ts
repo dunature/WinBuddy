@@ -650,10 +650,12 @@ function scanSkillsInDir(dir: string, enabled: boolean): SkillMeta[] {
         const importSource = readSkillImportSource(join(dir, entry.name))
         if (importSource) {
           meta.importSource = importSource
-          const sourceSkillDir = resolveSkillDir(importSource.sourceWorkspaceSlug, entry.name)
-          if (sourceSkillDir) {
-            const currentSourceVersion = parseSkillVersion(sourceSkillDir)
-            meta.hasUpdate = isNewerVersion(currentSourceVersion, importSource.sourceVersion)
+          if (importSource.kind === 'workspace') {
+            const sourceSkillDir = resolveSkillDir(importSource.sourceWorkspaceSlug, entry.name)
+            if (sourceSkillDir) {
+              const currentSourceVersion = parseSkillVersion(sourceSkillDir)
+              meta.hasUpdate = isNewerVersion(currentSourceVersion, importSource.sourceVersion)
+            }
           }
         }
 
@@ -770,6 +772,7 @@ export function importSkillFromWorkspace(
   // 写入来源元数据
   const sourceWorkspace = listAgentWorkspaces().find((w) => w.slug === sourceSlug)
   const importSource: SkillImportSource = {
+    kind: 'workspace',
     sourceWorkspaceSlug: sourceSlug,
     sourceWorkspaceName: sourceWorkspace?.name ?? sourceSlug,
     importedAt: new Date().toISOString(),
@@ -809,7 +812,7 @@ export function updateSkillFromSource(
   }
 
   const existingSource = readSkillImportSource(targetPath)
-  if (!existingSource) {
+  if (!existingSource || existingSource.kind !== 'workspace') {
     throw new Error(`Skill ${skillSlug} 不是从其他工作区导入的，无法从源更新`)
   }
 
@@ -838,6 +841,7 @@ export function updateSkillFromSource(
   // 更新来源元数据（保留原始 importedAt）
   const sourceWorkspace = listAgentWorkspaces().find((w) => w.slug === existingSource.sourceWorkspaceSlug)
   const updatedSource: SkillImportSource = {
+    kind: 'workspace',
     sourceWorkspaceSlug: existingSource.sourceWorkspaceSlug,
     sourceWorkspaceName: sourceWorkspace?.name ?? existingSource.sourceWorkspaceName,
     importedAt: existingSource.importedAt,
@@ -859,11 +863,53 @@ export function updateSkillFromSource(
 
 const SOURCE_META_FILE = '.source.json'
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function hasStringFields(value: Record<string, unknown>, fields: string[]): boolean {
+  return fields.every((field) => typeof value[field] === 'string')
+}
+
+export function normalizeSkillImportSource(value: unknown): SkillImportSource | undefined {
+  if (!isRecord(value)) return undefined
+  if (value.kind === 'marketplace') {
+    if (!hasStringFields(value, [
+      'marketplaceSkillId',
+      'identifier',
+      'installedVersion',
+      'contentHash',
+      'installedAt',
+    ])) return undefined
+    return {
+      kind: 'marketplace',
+      marketplaceSkillId: value.marketplaceSkillId as string,
+      identifier: value.identifier as string,
+      installedVersion: value.installedVersion as string,
+      contentHash: value.contentHash as string,
+      installedAt: value.installedAt as string,
+    }
+  }
+  if (value.kind !== undefined && value.kind !== 'workspace') return undefined
+  return hasStringFields(value, [
+    'sourceWorkspaceSlug',
+    'sourceWorkspaceName',
+    'importedAt',
+    'sourceVersion',
+  ]) ? {
+      kind: 'workspace',
+      sourceWorkspaceSlug: value.sourceWorkspaceSlug as string,
+      sourceWorkspaceName: value.sourceWorkspaceName as string,
+      importedAt: value.importedAt as string,
+      sourceVersion: value.sourceVersion as string,
+    } : undefined
+}
+
 function readSkillImportSource(skillDir: string): SkillImportSource | undefined {
   const p = join(skillDir, SOURCE_META_FILE)
   if (!existsSync(p)) return undefined
   try {
-    return JSON.parse(readFileSync(p, 'utf-8')) as SkillImportSource
+    return normalizeSkillImportSource(JSON.parse(readFileSync(p, 'utf-8')) as unknown)
   } catch {
     return undefined
   }

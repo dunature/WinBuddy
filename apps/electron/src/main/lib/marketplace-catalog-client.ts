@@ -5,6 +5,7 @@ import type {
   MarketplaceCategory,
   MarketplaceFileNode,
   MarketplaceListQuery,
+  MarketplaceInstallManifest,
   MarketplacePage,
   MarketplaceSkillDetail,
   MarketplaceSkillFile,
@@ -17,6 +18,7 @@ export interface MarketplaceCatalogClient {
   listSkills(query: MarketplaceListQuery): Promise<MarketplacePage<MarketplaceSkillSummary>>
   getSkill(identifier: string): Promise<MarketplaceSkillDetail>
   getSkillFile(identifier: string, version: string, path: string): Promise<MarketplaceSkillFile>
+  getInstallManifest(marketplaceSkillId: string, version: string): Promise<MarketplaceInstallManifest>
 }
 
 interface FixtureVersion extends MarketplaceVersionSummary {
@@ -193,6 +195,21 @@ class FixtureMarketplaceCatalogClient implements MarketplaceCatalogClient {
     if (size > 1024 * 1024) throw new Error('文本文件超过 1 MB，无法预览')
     return { path, size, content, isText: true }
   }
+
+  async getInstallManifest(marketplaceSkillId: string, versionValue: string): Promise<MarketplaceInstallManifest> {
+    const skill = fixtureSkills.find((item) => item.id === marketplaceSkillId)
+    const selectedVersion = skill?.versions.find((item) => item.version === versionValue)
+    if (!skill || !selectedVersion) throw new Error(`技能版本不存在: ${marketplaceSkillId}@${versionValue}`)
+    return {
+      marketplaceSkillId,
+      identifier: skill.identifier,
+      version: selectedVersion.version,
+      sha256: selectedVersion.sha256,
+      size: selectedVersion.size,
+      fileCount: selectedVersion.fileCount,
+      files: selectedVersion.files,
+    }
+  }
 }
 
 type MarketplaceRuntime = 'development' | 'test' | 'production'
@@ -262,6 +279,11 @@ class HttpMarketplaceCatalogClient implements MarketplaceCatalogClient {
   async getSkillFile(identifier: string, version: string, path: string): Promise<MarketplaceSkillFile> {
     const search = new URLSearchParams({ path })
     return this.data(`/marketplace/skills/${encodeURIComponent(identifier)}/versions/${encodeURIComponent(version)}/file?${search}`)
+  }
+
+
+  async getInstallManifest(marketplaceSkillId: string, version: string): Promise<MarketplaceInstallManifest> {
+    return this.data(`/marketplace/skills/by-id/${encodeURIComponent(marketplaceSkillId)}/versions/${encodeURIComponent(version)}/manifest`)
   }
 }
 

@@ -128,8 +128,10 @@ function SkillDetailBody({
 
   const sourceLabel = isBuiltin
     ? 'PROMA 内置'
-    : skill.importSource
+    : skill.importSource?.kind === 'workspace'
       ? `从 ${skill.importSource.sourceWorkspaceName} 导入`
+      : skill.importSource?.kind === 'marketplace'
+        ? `技能市场 · ${skill.importSource.installedVersion}`
       : '当前工作区'
 
   return (
