@@ -14,6 +14,7 @@ await initializeMarketplaceAdmin(database, {
 const app = createMarketplaceApp({
   database,
   webRoot: config.webRoot,
+  storageDir: config.storageDir,
   allowedOrigin: config.allowedOrigin,
 })
 
