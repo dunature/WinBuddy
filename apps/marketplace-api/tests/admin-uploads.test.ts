@@ -184,6 +184,24 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 包上传与校验 API（真实 
       SELECT sha256, size, file_count, status FROM skill_versions WHERE id = ${versionId}
     `
     expect(versions[0]).toMatchObject({ sha256: upload.sha256, size: zip.byteLength, file_count: 2, status: 'created' })
+    const audits = await database.sql<{
+      actor_identifier: string
+      request_id: string
+      skill_id: string
+      version_id: string
+      after_state: object
+      reason: string
+      created_at: Date | string
+    }[]>`
+      SELECT actor_identifier, request_id, skill_id, version_id, after_state, reason, created_at
+      FROM audit_entries
+      WHERE action IN ('skill_version.uploaded', 'skill_version.validated') AND version_id = ${versionId}
+    `
+    expect(audits).toHaveLength(2)
+    expect(audits.every((entry) => Boolean(entry.actor_identifier) && Boolean(entry.request_id)
+      && entry.skill_id === skillId && entry.version_id === versionId
+      && Boolean(entry.after_state) && Boolean(entry.reason)
+      && !Number.isNaN(new Date(entry.created_at).getTime()))).toBe(true)
   })
 
   test('Given 首次校验失败 When 重新上传合法包 Then 保留失败报告并追加成功记录', async () => {

@@ -6,7 +6,7 @@ import { performAdminBulkGovernance } from '../../admin-api'
 import {
   adminBulkSelectionAtom,
   adminBulkStateAtom,
-  failedBulkTargets,
+  retryableBulkTargets,
 } from '../../admin-bulk-state'
 
 interface AdminBulkBarProps {
@@ -34,7 +34,7 @@ export function AdminBulkBar({ csrfToken, onCompleted }: AdminBulkBarProps): Rea
     try {
       const result = await performAdminBulkGovernance(action, targets, reason.trim(), csrfToken)
       setState({ phase: 'complete', action, result, error: null })
-      setSelection(new Map(failedBulkTargets(result).map((target) => [target.key, target])))
+      setSelection(new Map(retryableBulkTargets(result).map((target) => [target.key, target])))
       onCompleted()
     } catch (error) {
       setState({
@@ -69,7 +69,7 @@ export function AdminBulkBar({ csrfToken, onCompleted }: AdminBulkBarProps): Rea
         <button type="button" aria-label="清空批量选择" onClick={clear}><X size={17} /></button>
       </div>
       {state.phase === 'submitting' && <p className="mt-3 flex items-center gap-2 text-xs text-white/60"><LoaderCircle className="animate-spin" size={14} /> 正在逐项执行，已完成条目不会被其他失败回滚</p>}
-      {state.error && <p role="alert" className="mt-3 text-xs font-semibold text-red-300">{state.error}</p>}
+      {state.error && <p role="alert" className="mt-3 text-xs font-semibold text-red-300">{state.error}<button type="button" className="ml-3 underline" onClick={() => { if (state.action) void execute(state.action, selectedTargets) }}>重试本次批量操作</button></p>}
       {state.result && (
         <div className="mt-3 rounded-2xl bg-white/[0.07] p-3 text-xs">
           <div className="font-semibold">
@@ -80,14 +80,16 @@ export function AdminBulkBar({ csrfToken, onCompleted }: AdminBulkBarProps): Rea
               <ul className="mt-2 space-y-1 text-red-200">
                 {state.result.failed.map((item) => <li key={item.key}>{item.label ?? item.key}：{item.code} · {item.message}</li>)}
               </ul>
-              <button
-                type="button"
-                className="admin-secondary-button mt-3 bg-white/10 text-white"
-                disabled={state.phase === 'submitting' || !state.action}
-                onClick={() => { if (state.action && state.result) void execute(state.action, failedBulkTargets(state.result)) }}
-              >
-                <RotateCcw size={14} /> 仅重试失败项
-              </button>
+              {retryableBulkTargets(state.result).length > 0 && (
+                <button
+                  type="button"
+                  className="admin-secondary-button mt-3 bg-white/10 text-white"
+                  disabled={state.phase === 'submitting' || !state.action}
+                  onClick={() => { if (state.action && state.result) void execute(state.action, retryableBulkTargets(state.result)) }}
+                >
+                  <RotateCcw size={14} /> 仅重试可重试项
+                </button>
+              )}
             </>
           )}
           {state.result.skipped.length > 0 && (

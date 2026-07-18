@@ -1,5 +1,7 @@
 import type {
   MarketplaceAdminIdentity,
+  MarketplaceAdminAuditEntry,
+  MarketplaceAdminAuditQuery,
   MarketplaceAdminCategory,
   MarketplaceAdminSession,
   MarketplaceAdminSkillDetail,
@@ -16,16 +18,35 @@ import type {
   MarketplaceApiSuccess,
   MarketplacePage,
 } from '@proma/shared'
-import { requestMarketplaceEnvelope } from './api'
+import { MarketplaceRequestError, requestMarketplaceEnvelope } from './api'
+import { buildAdminAuditSearch } from './admin-audit-state'
 
-async function adminRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await requestMarketplaceEnvelope(path, init) as unknown as MarketplaceApiSuccess<T>
-  return response.data
+export const ADMIN_SESSION_EXPIRED_EVENT = 'proma:marketplace-admin-session-expired'
+
+function notifyExpiredSession(error: unknown): void {
+  if (error instanceof MarketplaceRequestError && error.status === 401 && typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(ADMIN_SESSION_EXPIRED_EVENT))
+  }
 }
 
-async function adminPageRequest<T>(path: string): Promise<MarketplacePage<T>> {
-  const response = await requestMarketplaceEnvelope(path) as unknown as MarketplaceApiPage<T>
-  return { items: response.data, page: response.page }
+async function adminRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  try {
+    const response = await requestMarketplaceEnvelope(path, init) as unknown as MarketplaceApiSuccess<T>
+    return response.data
+  } catch (error) {
+    notifyExpiredSession(error)
+    throw error
+  }
+}
+
+async function adminPageRequest<T>(path: string, signal?: AbortSignal): Promise<MarketplacePage<T>> {
+  try {
+    const response = await requestMarketplaceEnvelope(path, { signal }) as unknown as MarketplaceApiPage<T>
+    return { items: response.data, page: response.page }
+  } catch (error) {
+    notifyExpiredSession(error)
+    throw error
+  }
 }
 
 let adminSessionRequest: Promise<MarketplaceAdminSession> | null = null
@@ -153,6 +174,13 @@ export async function deleteAdminTag(tagId: string, revision: number, csrfToken:
 
 export async function listAdminSkills(): Promise<MarketplacePage<MarketplaceAdminSkillSummary>> {
   return adminPageRequest('/admin/skills?pageSize=50')
+}
+
+export async function listAdminAuditEntries(
+  query: MarketplaceAdminAuditQuery,
+  signal?: AbortSignal,
+): Promise<MarketplacePage<MarketplaceAdminAuditEntry>> {
+  return adminPageRequest(`/admin/audit-entries?${buildAdminAuditSearch(query)}`, signal)
 }
 
 export async function getAdminSkill(skillId: string): Promise<MarketplaceAdminSkillDetail> {

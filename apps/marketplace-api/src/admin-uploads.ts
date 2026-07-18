@@ -30,6 +30,7 @@ export interface MarketplaceAdminUploadContext {
 }
 
 interface UploadTargetRow {
+  skill_id: string
   version_id: string
   version: string
   version_status: MarketplaceVersionStatus
@@ -233,7 +234,7 @@ export class MarketplaceUploadManager {
       const rows = await transaction<UploadJobRow[]>`
         SELECT uploads.id, uploads.storage_key, uploads.sha256, uploads.size, uploads.attempt_count,
           versions.id AS version_id, versions.version, versions.status AS version_status,
-          versions.revision AS version_revision, skills.identifier
+          versions.revision AS version_revision, versions.skill_id, skills.identifier
         FROM uploads
         INNER JOIN skill_versions versions ON versions.id = uploads.skill_version_id
         INNER JOIN skills ON skills.id = versions.skill_id
@@ -291,10 +292,10 @@ export class MarketplaceUploadManager {
       }
       await transaction`
         INSERT INTO audit_entries (
-          id, actor_identifier, action, request_id, after_state, reason
+          id, actor_identifier, action, request_id, skill_id, version_id, after_state, reason
         ) VALUES (
           ${randomUUID()}, 'marketplace-validation-worker', 'skill_version.validated',
-          ${`validation:${job.id}`},
+          ${`validation:${job.id}`}, ${job.skill_id}, ${job.version_id},
           ${JSON.stringify({
             uploadId: job.id,
             versionId: job.version_id,
@@ -310,7 +311,7 @@ export class MarketplaceUploadManager {
   private async target(skillId: string, versionId: string): Promise<UploadTargetRow | null> {
     const rows = await this.database.sql<UploadTargetRow[]>`
       SELECT versions.id AS version_id, versions.version, versions.status AS version_status,
-        versions.revision AS version_revision, skills.identifier
+        versions.revision AS version_revision, versions.skill_id, skills.identifier
       FROM skill_versions versions
       INNER JOIN skills ON skills.id = versions.skill_id
       WHERE versions.id = ${versionId} AND versions.skill_id = ${skillId} AND skills.deleted_at IS NULL
@@ -359,10 +360,10 @@ export class MarketplaceUploadManager {
         `
         await transaction`
           INSERT INTO audit_entries (
-            id, actor_id, actor_identifier, action, request_id, after_state, reason
+            id, actor_id, actor_identifier, action, request_id, skill_id, version_id, after_state, reason
           ) VALUES (
             ${randomUUID()}, ${context.actor.adminId}, ${context.actor.username},
-            'skill_version.uploaded', ${context.requestId},
+            'skill_version.uploaded', ${context.requestId}, ${skillId}, ${versionId},
             ${JSON.stringify({ uploadId, versionId, sha256: streamed.sha256, size: streamed.size })}::jsonb,
             '管理员上传 Skill 候选版本包'
           )

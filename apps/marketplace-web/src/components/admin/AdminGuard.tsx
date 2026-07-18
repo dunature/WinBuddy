@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useAtom } from 'jotai'
 import { Navigate, Outlet, useLocation } from 'react-router'
 import { LoaderCircle } from 'lucide-react'
-import { getAdminSession } from '../../admin-api'
+import { ADMIN_SESSION_EXPIRED_EVENT, getAdminSession } from '../../admin-api'
 import { adminAuthAtom, authenticatedAdminState } from '../../admin-state'
 
 export function AdminGuard(): React.ReactElement {
@@ -11,6 +11,8 @@ export function AdminGuard(): React.ReactElement {
 
   React.useEffect(() => {
     let active = true
+    const sessionExpired = (): void => setAuth({ status: 'unauthenticated', session: null })
+    window.addEventListener(ADMIN_SESSION_EXPIRED_EVENT, sessionExpired)
     setAuth({ status: 'loading', session: null })
     getAdminSession()
       .then((session) => {
@@ -19,7 +21,10 @@ export function AdminGuard(): React.ReactElement {
       .catch(() => {
         if (active) setAuth({ status: 'unauthenticated', session: null })
       })
-    return () => { active = false }
+    return () => {
+      active = false
+      window.removeEventListener(ADMIN_SESSION_EXPIRED_EVENT, sessionExpired)
+    }
   }, [setAuth])
 
   if (auth.status === 'idle' || auth.status === 'loading') {

@@ -9,6 +9,7 @@ import { createMarketplaceAdminDraftRouter } from './admin-draft-routes'
 import { createMarketplaceAdminPublishRouter } from './admin-publish-routes'
 import { createMarketplaceAdminUploadRouter } from './admin-upload-routes'
 import { createMarketplaceAdminTaxonomyRouter } from './admin-taxonomy-routes'
+import { createMarketplaceAdminAuditRouter } from './admin-audit-routes'
 import { createMarketplaceAdminBulkGovernanceRouter } from './admin-bulk-governance-routes'
 import {
   ADMIN_CSRF_COOKIE,
@@ -310,6 +311,7 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
 
   app.route('/api/v1/admin', createMarketplaceAdminDraftRouter(options.database))
   app.route('/api/v1/admin', createMarketplaceAdminTaxonomyRouter(options.database))
+  app.route('/api/v1/admin', createMarketplaceAdminAuditRouter(options.database))
   if (options.storageDir) {
     app.route('/api/v1/admin', createMarketplaceAdminBulkGovernanceRouter(options.database, options.storageDir))
     app.route('/api/v1/admin', createMarketplaceAdminUploadRouter(options.database, options.storageDir))

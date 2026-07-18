@@ -308,10 +308,10 @@ export async function createMarketplaceAdminSkill(
       }
       await transaction`
         INSERT INTO audit_entries (
-          id, actor_id, actor_identifier, action, request_id, after_state, reason
+          id, actor_id, actor_identifier, action, request_id, skill_id, after_state, reason
         ) VALUES (
           ${randomUUID()}, ${context.actor.adminId}, ${context.actor.username}, 'skill.created',
-          ${context.requestId},
+          ${context.requestId}, ${id},
           ${JSON.stringify({ id, identifier: input.identifier, status: initialState.status, revision: 1 })}::jsonb,
           '管理员创建 Skill 草稿'
         )
@@ -390,10 +390,10 @@ export async function updateMarketplaceAdminSkill(
       }
       await transaction`
         INSERT INTO audit_entries (
-          id, actor_id, actor_identifier, action, request_id, before_state, after_state, reason
+          id, actor_id, actor_identifier, action, request_id, skill_id, before_state, after_state, reason
         ) VALUES (
           ${randomUUID()}, ${context.actor.adminId}, ${context.actor.username}, 'skill.updated',
-          ${context.requestId},
+          ${context.requestId}, ${skillId},
           ${JSON.stringify({ identifier: current.identifier, name: current.name, revision: current.revision })}::jsonb,
           ${JSON.stringify(afterState)}::jsonb,
           '管理员更新 Skill 草稿'
@@ -450,10 +450,11 @@ export async function createMarketplaceAdminVersion(
       `
       await transaction`
         INSERT INTO audit_entries (
-          id, actor_id, actor_identifier, action, request_id, before_state, after_state, reason
+          id, actor_id, actor_identifier, action, request_id, skill_id, version_id,
+          before_state, after_state, reason
         ) VALUES (
           ${randomUUID()}, ${context.actor.adminId}, ${context.actor.username}, 'skill_version.created',
-          ${context.requestId},
+          ${context.requestId}, ${skillId}, ${versionId},
           ${JSON.stringify({ currentPublishedVersionId: initialState.currentPublishedVersionId })}::jsonb,
           ${JSON.stringify({
             id: versionId,
@@ -514,10 +515,11 @@ export async function updateMarketplaceAdminVersion(
       `
       await transaction`
         INSERT INTO audit_entries (
-          id, actor_id, actor_identifier, action, request_id, before_state, after_state, reason
+          id, actor_id, actor_identifier, action, request_id, skill_id, version_id,
+          before_state, after_state, reason
         ) VALUES (
           ${randomUUID()}, ${context.actor.adminId}, ${context.actor.username}, 'skill_version.updated',
-          ${context.requestId},
+          ${context.requestId}, ${skillId}, ${versionId},
           ${JSON.stringify({ version: current.version, changelog: current.changelog, revision: current.revision })}::jsonb,
           ${JSON.stringify({
             version: input.version ?? current.version,
@@ -572,10 +574,10 @@ export async function deleteMarketplaceAdminSkill(
     `
     await transaction`
       INSERT INTO audit_entries (
-        id, actor_id, actor_identifier, action, request_id, before_state, after_state, reason
+        id, actor_id, actor_identifier, action, request_id, skill_id, before_state, after_state, reason
       ) VALUES (
         ${randomUUID()}, ${context.actor.adminId}, ${context.actor.username}, 'skill.deleted',
-        ${context.requestId},
+        ${context.requestId}, ${skillId},
         ${JSON.stringify({ id: current.id, identifier: current.identifier, status: current.status, revision })}::jsonb,
         ${JSON.stringify({ deleted: true, revision: revision + 1 })}::jsonb,
         '管理员软删除 Skill 草稿'

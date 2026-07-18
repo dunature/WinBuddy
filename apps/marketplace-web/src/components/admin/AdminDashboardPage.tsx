@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useAtom } from 'jotai'
 import { useNavigate } from 'react-router'
-import { FilePlus2, LoaderCircle, LogOut, RefreshCw, ShieldCheck } from 'lucide-react'
+import { FilePlus2, LoaderCircle, LogOut, RefreshCw, ScrollText, ShieldCheck } from 'lucide-react'
 import type {
   MarketplaceAdminSkillDetail,
   MarketplaceAdminSkillSummary,
@@ -19,9 +19,11 @@ import {
 } from '../../admin-api'
 import { adminDraftWorkspaceAtom } from '../../admin-draft-state'
 import { adminBulkSelectionAtom, adminBulkStateAtom, updateBulkSelection } from '../../admin-bulk-state'
+import { adminAuditVisibleAtom } from '../../admin-audit-state'
 import { adminAuthAtom } from '../../admin-state'
 import { AdminSkillEditor } from './AdminSkillEditor'
 import { AdminBulkBar } from './AdminBulkBar'
+import { AdminAuditPanel } from './AdminAuditPanel'
 import { AdminTaxonomyPanel } from './AdminTaxonomyPanel'
 import { AdminVersionPanel } from './AdminVersionPanel'
 
@@ -38,8 +40,10 @@ export function AdminDashboardPage(): React.ReactElement {
   const [workspace, setWorkspace] = useAtom(adminDraftWorkspaceAtom)
   const [bulkSelection, setBulkSelection] = useAtom(adminBulkSelectionAtom)
   const [, setBulkState] = useAtom(adminBulkStateAtom)
+  const [auditVisible, setAuditVisible] = useAtom(adminAuditVisibleAtom)
   const navigate = useNavigate()
   const [logoutError, setLogoutError] = React.useState<string | null>(null)
+  const selectedSkillId = workspace.selectedSkill?.id
 
   const loadWorkspace = React.useCallback(async (): Promise<void> => {
     setWorkspace((current) => ({ ...current, status: 'loading', error: null }))
@@ -47,7 +51,8 @@ export function AdminDashboardPage(): React.ReactElement {
       const [skills, categories, tags] = await Promise.all([
         listAdminSkills(), listAdminCategories(), listAdminTags(),
       ])
-      const selectedSkill = skills.items[0] ? await getAdminSkill(skills.items[0].id) : null
+      const selectedSummary = skills.items.find((item) => item.id === selectedSkillId) ?? skills.items[0]
+      const selectedSkill = selectedSummary ? await getAdminSkill(selectedSummary.id) : null
       setWorkspace({
         status: 'ready',
         items: skills.items,
@@ -64,7 +69,7 @@ export function AdminDashboardPage(): React.ReactElement {
         error: requestError instanceof Error ? requestError.message : '草稿工作台加载失败',
       }))
     }
-  }, [setWorkspace])
+  }, [selectedSkillId, setWorkspace])
 
   React.useEffect(() => {
     if (workspace.status === 'idle') void loadWorkspace()
@@ -144,14 +149,17 @@ export function AdminDashboardPage(): React.ReactElement {
         }
       : current)
     void getAdminSkill(skillId)
-      .then((skill) => setWorkspace((current) => current.selectedSkill?.id === skillId
-        ? {
-            ...current,
-            items: upsertSkill(current.items, skill),
-            selectedSkill: skill,
-            error: null,
-          }
-        : current))
+      .then((skill) => setWorkspace((current) => {
+        if (current.selectedSkill?.id !== skillId) return current
+        const displayedRevisions = new Map(current.selectedSkill.versions.map((item) => [item.id, item.revision]))
+        if (skill.versions.some((item) => item.revision < (displayedRevisions.get(item.id) ?? 0))) return current
+        return {
+          ...current,
+          items: upsertSkill(current.items, skill),
+          selectedSkill: skill,
+          error: null,
+        }
+      }))
       .catch((requestError: unknown) => setWorkspace((current) => ({
         ...current,
         error: requestError instanceof Error ? requestError.message : '版本治理状态刷新失败',
@@ -183,6 +191,7 @@ export function AdminDashboardPage(): React.ReactElement {
             <div><div className="font-display text-lg font-semibold">Proma Authority</div><div className="text-[10px] uppercase tracking-[0.18em] text-white/40">Draft Registry</div></div>
           </div>
           <div className="flex items-center gap-3">
+            <button type="button" onClick={() => setAuditVisible((current) => !current)} className="inline-flex items-center gap-2 rounded-full bg-white/[0.07] px-3 py-1.5 text-xs font-semibold text-white/[0.65] transition hover:bg-white/[0.12] hover:text-white"><ScrollText size={14} /> {auditVisible ? '收起审计' : '审计日志'}</button>
             <span className="rounded-full bg-white/[0.07] px-3 py-1.5 text-xs text-white/[0.65]">{auth.session?.admin.username}</span>
             <button type="button" onClick={() => { void logout() }} className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold text-white/[0.65] transition hover:bg-white/[0.08] hover:text-white">
               <LogOut size={14} /> 退出
@@ -191,7 +200,10 @@ export function AdminDashboardPage(): React.ReactElement {
         </header>
 
         {(logoutError || workspace.error) && (
-          <div role="alert" className="mt-5 rounded-2xl bg-red-400/12 px-4 py-3 text-sm text-red-200">{logoutError ?? workspace.error}</div>
+          <div role="alert" className="mt-5 rounded-2xl bg-red-400/12 px-4 py-3 text-sm text-red-200">
+            {logoutError ?? workspace.error}
+            {workspace.error && <button type="button" onClick={() => { void loadWorkspace() }} className="ml-3 inline-flex items-center gap-1 font-bold"><RefreshCw size={14} /> 重试工作台</button>}
+          </div>
         )}
 
         <section className="flex flex-wrap items-end justify-between gap-6 py-9 sm:py-12">
@@ -208,6 +220,8 @@ export function AdminDashboardPage(): React.ReactElement {
             <FilePlus2 size={18} /> 新建 Skill
           </button>
         </section>
+
+        {auditVisible && <AdminAuditPanel skills={workspace.items} />}
 
         {workspace.status !== 'loading' && (
           <AdminTaxonomyPanel

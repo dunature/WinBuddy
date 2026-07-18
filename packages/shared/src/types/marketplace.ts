@@ -280,6 +280,32 @@ export interface MarketplaceAdminVersionActionResult {
   version: MarketplaceAdminVersion
 }
 
+export interface MarketplaceAdminAuditQuery {
+  skillId: string
+  actor: string
+  action: string
+  from: string
+  to: string
+  page: number
+  pageSize: number
+}
+
+export interface MarketplaceAdminAuditEntry {
+  id: string
+  actorId?: string
+  actorIdentifier?: string
+  action: string
+  requestId: string
+  skillId?: string
+  skillIdentifier?: string
+  versionId?: string
+  version?: string
+  beforeState: unknown
+  afterState: unknown
+  reason?: string
+  createdAt: string
+}
+
 export type MarketplaceBulkGovernanceAction = 'unpublish' | 'archive' | 'delete_draft'
 export type MarketplaceBulkGovernanceOutcome = 'succeeded' | 'skipped' | 'failed'
 
@@ -295,6 +321,7 @@ export interface MarketplaceBulkGovernanceItemResult extends MarketplaceBulkGove
   outcome: MarketplaceBulkGovernanceOutcome
   code: string
   message: string
+  retryable: boolean
 }
 
 export interface MarketplaceBulkGovernanceResult {
