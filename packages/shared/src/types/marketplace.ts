@@ -276,6 +276,25 @@ export interface MarketplaceAdminUpload {
   report: MarketplaceValidationReport | null
 }
 
+/** 主进程从真实工作区目录验证后返回的市场 Skill 安装状态。 */
+export interface MarketplaceInstalledSkill {
+  marketplaceSkillId: string
+  identifier: string
+  installedVersion: string
+  contentHash: string
+  installedAt: string
+  enabled: boolean
+}
+
+export interface MarketplaceInstalledSkillRequest {
+  workspaceSlug: string
+  marketplaceSkillId: string
+}
+
+export interface MarketplaceToggleInstalledSkillRequest extends MarketplaceInstalledSkillRequest {
+  enabled: boolean
+}
+
 export const MARKETPLACE_IPC_CHANNELS = {
   LIST_CATEGORIES: 'marketplace:list-categories',
   LIST_SKILLS: 'marketplace:list-skills',
@@ -288,5 +307,9 @@ export const MARKETPLACE_IPC_CHANNELS = {
   UPDATE: 'marketplace:update',
   CONFIRM_CONFLICT: 'marketplace:confirm-conflict',
   CANCEL: 'marketplace:cancel',
+  LIST_INSTALLED_SKILLS: 'marketplace:list-installed-skills',
+  GET_INSTALLED_SKILL: 'marketplace:get-installed-skill',
+  SET_INSTALLED_SKILL_ENABLED: 'marketplace:set-installed-skill-enabled',
+  UNINSTALL_SKILL: 'marketplace:uninstall-skill',
   INSTALL_PROGRESS: 'marketplace:install-progress',
 } as const

@@ -10,6 +10,7 @@ import type {
   MarketplaceSort,
 } from '@proma/shared'
 import type { MarketplaceDetailTab } from './marketplace-route'
+import { workspaceCapabilitiesVersionAtom } from './agent-atoms'
 
 export interface MarketplaceState {
   searchInput: string
@@ -59,6 +60,9 @@ export const initialMarketplaceState: MarketplaceState = {
 
 export const marketplaceStateAtom = atom<MarketplaceState>(initialMarketplaceState)
 export const marketplaceInstallTasksAtom = atom<Map<string, MarketplaceInstallState>>(new Map())
+export const notifyMarketplaceWorkspaceChangedAtom = atom(null, (get, set) => {
+  set(workspaceCapabilitiesVersionAtom, get(workspaceCapabilitiesVersionAtom) + 1)
+})
 
 export function withMarketplaceInstallState(
   tasks: Map<string, MarketplaceInstallState>,

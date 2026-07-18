@@ -1,12 +1,15 @@
 import { describe, expect, test } from 'bun:test'
+import { createStore } from 'jotai/vanilla'
 import {
   findMarketplaceInstallTask,
   initialMarketplaceState,
   marketplaceInstallPhaseLabel,
+  notifyMarketplaceWorkspaceChangedAtom,
   toMarketplaceListQuery,
   withMarketplaceInstallState,
 } from './marketplace-atoms'
 import type { MarketplaceInstallState } from '@proma/shared'
+import { workspaceCapabilitiesVersionAtom } from './agent-atoms'
 
 describe('技能市场查询状态', () => {
   test('Given 未整理的筛选状态 When 转换为目录查询 Then 去除空白并保留分页条件', () => {
@@ -86,4 +89,13 @@ test('Given 固定安装阶段 When 显示进度 Then 每个阶段都有中文�
   ].map((phase) => marketplaceInstallPhaseLabel(phase as MarketplaceInstallState['phase']))).toEqual([
     '等待安装', '正在下载', '正在校验', '正在解压', '正在提交', '安装完成', '安装失败', '已取消',
   ])
+})
+
+test('Given 市场 Skill 生命周期成功 When 通知工作区变化 Then 递增能力版本', () => {
+  const store = createStore()
+  store.set(workspaceCapabilitiesVersionAtom, 4)
+
+  store.set(notifyMarketplaceWorkspaceChangedAtom)
+
+  expect(store.get(workspaceCapabilitiesVersionAtom)).toBe(5)
 })

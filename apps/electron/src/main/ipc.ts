@@ -186,6 +186,8 @@ import { setBuiltinMcpUserEnabled } from './lib/builtin-mcp/settings'
 import { setDockBadgeCount } from './lib/dock-badge-service'
 import { createMarketplaceCatalogClient } from './lib/marketplace-catalog-client'
 import { MarketplaceInstaller } from './lib/marketplace-installer'
+import { MarketplaceSkillLifecycle } from './lib/marketplace-skill-lifecycle'
+import { registerMarketplaceSkillLifecycleIpc } from './lib/marketplace-skill-lifecycle-ipc'
 
 import { checkEnvironment } from './lib/environment-checker'
 import { fetchInstallerManifest, findInstallerSource } from './lib/installer-manifest'
@@ -864,23 +866,33 @@ export function registerIpcHandlers(): void {
   const marketplaceCatalogClient = createMarketplaceCatalogClient({
     runtime: app.isPackaged ? 'production' : 'development',
   })
+  const resolveMarketplaceWorkspaceDirectories = (workspaceSlug: string) => {
+    if (!listAgentWorkspaces().some((workspace) => workspace.slug === workspaceSlug)) {
+      throw new Error(`Agent 工作区不存在: ${workspaceSlug}`)
+    }
+    return {
+      skillsDirectory: getWorkspaceSkillsDir(workspaceSlug),
+      inactiveSkillsDirectory: getInactiveSkillsDir(workspaceSlug),
+    }
+  }
   const marketplaceInstaller = new MarketplaceInstaller({
     catalogClient: marketplaceCatalogClient,
-    resolveWorkspaceDirectories: (workspaceSlug) => {
-      if (!listAgentWorkspaces().some((workspace) => workspace.slug === workspaceSlug)) {
-        throw new Error(`Agent 工作区不存在: ${workspaceSlug}`)
-      }
-      return {
-        skillsDirectory: getWorkspaceSkillsDir(workspaceSlug),
-        inactiveSkillsDirectory: getInactiveSkillsDir(workspaceSlug),
-      }
-    },
+    resolveWorkspaceDirectories: resolveMarketplaceWorkspaceDirectories,
     onProgress: (state) => {
       BrowserWindow.getAllWindows().forEach((window) => {
         if (!window.isDestroyed()) window.webContents.send(MARKETPLACE_IPC_CHANNELS.INSTALL_PROGRESS, state)
       })
     },
   })
+  const marketplaceSkillLifecycle = new MarketplaceSkillLifecycle({
+    resolveWorkspaceDirectories: resolveMarketplaceWorkspaceDirectories,
+  })
+  registerMarketplaceSkillLifecycleIpc(
+    (channel, handler) => {
+      ipcMain.handle(channel, (_, ...args: unknown[]) => handler(...args))
+    },
+    marketplaceSkillLifecycle,
+  )
 
   // ===== 技能市场（只读） =====
 

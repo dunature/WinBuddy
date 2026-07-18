@@ -367,6 +367,18 @@ export function AgentSkillsView(): React.ReactElement {
         <div className="mx-auto w-full max-w-6xl px-8 pb-10">
           {data.loading ? (
             <div className="py-20 text-center text-sm text-muted-foreground">加载中...</div>
+          ) : data.loadError ? (
+            <div className="flex flex-col items-center gap-3 py-20 text-center">
+              <div className="text-sm font-medium text-destructive">加载工作区能力失败</div>
+              <div className="max-w-lg text-xs text-muted-foreground">{data.loadError}</div>
+              <button
+                type="button"
+                onClick={() => void data.reload()}
+                className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
+              >
+                重新加载
+              </button>
+            </div>
           ) : tab === 'skills' ? (
             <SkillsTab
               customSkills={customSkills}
