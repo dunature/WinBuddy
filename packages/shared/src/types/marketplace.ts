@@ -203,6 +203,8 @@ export interface MarketplaceAdminVersion {
   version: string
   changelog: string
   status: MarketplaceVersionStatus
+  allowedActions: MarketplaceVersionAllowedAction[]
+  nextAction: MarketplaceVersionAllowedAction | null
   revision: number
   createdAt: string
   updatedAt: string
@@ -221,6 +223,8 @@ export interface MarketplaceAdminSkillSummary {
   icon: string
   featured: boolean
   status: MarketplaceSkillStatus
+  allowedActions: MarketplaceSkillGovernanceAction[]
+  nextAction: MarketplaceSkillGovernanceAction | null
   currentPublishedVersionId: string | null
   revision: number
   createdAt: string
@@ -231,10 +235,23 @@ export interface MarketplaceAdminSkillDetail extends MarketplaceAdminSkillSummar
   versions: MarketplaceAdminVersion[]
 }
 
-export type MarketplaceGoldenPathAction = 'submit_review' | 'approve' | 'publish'
+export type MarketplaceVersionGovernanceAction =
+  | 'submit_review'
+  | 'approve'
+  | 'reject'
+  | 'return_to_edit'
+  | 'withdraw'
+  | 'publish'
+  | 'unpublish'
+  | 'republish'
+  | 'archive'
+
+export type MarketplaceVersionAllowedAction = MarketplaceVersionGovernanceAction | 'reupload'
+export type MarketplaceSkillGovernanceAction = 'edit_draft' | 'create_version' | 'delete_draft'
+export type MarketplaceGoldenPathAction = Extract<MarketplaceVersionGovernanceAction, 'submit_review' | 'approve' | 'publish'>
 
 export interface MarketplaceAdminVersionActionResult {
-  action: MarketplaceGoldenPathAction
+  action: MarketplaceVersionGovernanceAction
   changed: boolean
   skill: MarketplaceAdminSkillDetail
   version: MarketplaceAdminVersion
