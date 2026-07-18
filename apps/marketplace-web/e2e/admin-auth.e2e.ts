@@ -31,7 +31,7 @@ test('Given 初始管理员 When 登录改密且会话到期 Then 管理路由�
   await page.getByLabel('编辑标签 自动化').click()
   await page.getByLabel('重命名 自动化').fill('效率自动化')
   await page.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(taxonomyPanel.getByText('效率自动化', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('编辑标签 效率自动化')).toBeVisible()
 
   await page.getByRole('button', { name: '新建 Skill' }).click()
   await page.getByLabel('Identifier').fill('daily-briefing')
