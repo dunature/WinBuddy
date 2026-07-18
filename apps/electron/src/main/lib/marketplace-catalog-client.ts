@@ -1,4 +1,7 @@
 import type {
+  MarketplaceApiError,
+  MarketplaceApiPage,
+  MarketplaceApiSuccess,
   MarketplaceCategory,
   MarketplaceFileNode,
   MarketplaceListQuery,
@@ -192,15 +195,74 @@ class FixtureMarketplaceCatalogClient implements MarketplaceCatalogClient {
   }
 }
 
-class UnavailableMarketplaceCatalogClient implements MarketplaceCatalogClient {
-  private unavailable(): never {
-    throw new Error('技能市场服务暂不可用，请稍后重试')
+type MarketplaceRuntime = 'development' | 'test' | 'production'
+type MarketplaceFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+class HttpMarketplaceCatalogClient implements MarketplaceCatalogClient {
+  constructor(
+    private readonly apiBaseUrl: string,
+    private readonly fetchFn: MarketplaceFetch,
+  ) {}
+
+  private async envelope(path: string): Promise<Record<string, unknown>> {
+    let response: Response
+    try {
+      response = await this.fetchFn(`${this.apiBaseUrl}${path}`, {
+        headers: { accept: 'application/json' },
+        signal: AbortSignal.timeout(10_000),
+      })
+    } catch {
+      throw new Error('技能市场服务暂不可用，请稍后重试')
+    }
+
+    let payload: unknown
+    try {
+      payload = await response.json()
+    } catch {
+      throw new Error('技能市场服务返回了无法识别的响应')
+    }
+    if (!isRecord(payload)) throw new Error('技能市场服务返回了无法识别的响应')
+    if (!response.ok) {
+      const error = payload as unknown as MarketplaceApiError
+      throw new Error(error.error?.message || '技能市场请求失败')
+    }
+    return payload
   }
 
-  async listCategories(): Promise<MarketplaceCategory[]> { return this.unavailable() }
-  async listSkills(_query: MarketplaceListQuery): Promise<MarketplacePage<MarketplaceSkillSummary>> { return this.unavailable() }
-  async getSkill(_identifier: string): Promise<MarketplaceSkillDetail> { return this.unavailable() }
-  async getSkillFile(_identifier: string, _version: string, _path: string): Promise<MarketplaceSkillFile> { return this.unavailable() }
+  private async data<T>(path: string): Promise<T> {
+    const envelope = await this.envelope(path) as unknown as MarketplaceApiSuccess<T>
+    return envelope.data
+  }
+
+  async listCategories(): Promise<MarketplaceCategory[]> {
+    return this.data('/marketplace/categories')
+  }
+
+  async listSkills(query: MarketplaceListQuery): Promise<MarketplacePage<MarketplaceSkillSummary>> {
+    const search = new URLSearchParams({
+      sort: query.sort,
+      page: String(query.page),
+      pageSize: String(query.pageSize),
+    })
+    if (query.query?.trim()) search.set('q', query.query.trim())
+    if (query.category) search.set('category', query.category)
+    if (query.featured) search.set('featured', '1')
+    const envelope = await this.envelope(`/marketplace/skills?${search}`) as unknown as MarketplaceApiPage<MarketplaceSkillSummary>
+    return { items: envelope.data, page: envelope.page }
+  }
+
+  async getSkill(identifier: string): Promise<MarketplaceSkillDetail> {
+    return this.data(`/marketplace/skills/${encodeURIComponent(identifier)}`)
+  }
+
+  async getSkillFile(identifier: string, version: string, path: string): Promise<MarketplaceSkillFile> {
+    const search = new URLSearchParams({ path })
+    return this.data(`/marketplace/skills/${encodeURIComponent(identifier)}/versions/${encodeURIComponent(version)}/file?${search}`)
+  }
 }
 
 export function createFixtureMarketplaceCatalogClient(): MarketplaceCatalogClient {
@@ -209,10 +271,18 @@ export function createFixtureMarketplaceCatalogClient(): MarketplaceCatalogClien
 
 export interface MarketplaceCatalogClientOptions {
   enableFixture?: boolean
+  runtime?: MarketplaceRuntime
+  apiBaseUrl?: string
+  fetchFn?: MarketplaceFetch
 }
 
 export function createMarketplaceCatalogClient(options: MarketplaceCatalogClientOptions = {}): MarketplaceCatalogClient {
-  const fixtureEnabled = options.enableFixture
-    ?? (process.env.PROMA_MARKETPLACE_FIXTURE === '1' || process.env.NODE_ENV === 'test')
-  return fixtureEnabled ? createFixtureMarketplaceCatalogClient() : new UnavailableMarketplaceCatalogClient()
+  const runtime = options.runtime ?? (process.env.NODE_ENV === 'test' ? 'test' : 'production')
+  const fixtureRequested = options.enableFixture ?? process.env.PROMA_MARKETPLACE_FIXTURE === '1'
+  if (fixtureRequested && runtime !== 'production') return createFixtureMarketplaceCatalogClient()
+
+  const apiBaseUrl = (options.apiBaseUrl
+    ?? process.env.PROMA_MARKETPLACE_API_BASE_URL
+    ?? 'https://www.feiyangclaw.com/api/v1').replace(/\/+$/, '')
+  return new HttpMarketplaceCatalogClient(apiBaseUrl, options.fetchFn ?? fetch)
 }

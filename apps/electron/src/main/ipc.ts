@@ -857,7 +857,9 @@ export function resolveAppIconPath(variantId: string): string | null {
 
 export function registerIpcHandlers(): void {
   console.log('[IPC] 正在注册 IPC 处理器...')
-  const marketplaceCatalogClient = createMarketplaceCatalogClient({ enableFixture: !app.isPackaged })
+  const marketplaceCatalogClient = createMarketplaceCatalogClient({
+    runtime: app.isPackaged ? 'production' : 'development',
+  })
 
   // ===== 技能市场（只读） =====
 

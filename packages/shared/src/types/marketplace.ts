@@ -28,6 +28,26 @@ export interface MarketplacePage<T> {
   page: MarketplacePageInfo
 }
 
+export interface MarketplaceApiSuccess<T> {
+  data: T
+  requestId: string
+}
+
+export interface MarketplaceApiPage<T> {
+  data: T[]
+  page: MarketplacePageInfo
+  requestId: string
+}
+
+export interface MarketplaceApiError {
+  error: {
+    code: string
+    message: string
+    details?: unknown
+  }
+  requestId: string
+}
+
 export interface MarketplaceSkillSummary {
   id: string
   identifier: string
@@ -72,6 +92,17 @@ export interface MarketplaceSkillFile {
   size: number
   content?: string
   isText: boolean
+}
+
+export interface MarketplaceInstallManifest {
+  marketplaceSkillId: string
+  identifier: string
+  version: string
+  sha256: string
+  size: number
+  fileCount: number
+  files: MarketplaceFileNode[]
+  downloadUrl?: string
 }
 
 export const MARKETPLACE_IPC_CHANNELS = {
