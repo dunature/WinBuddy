@@ -1,12 +1,8 @@
-import type { SDKMessage, SDKResultMessage, UsageRescanResult } from '@proma/shared'
+import type { SDKMessage, UsageRescanResult } from '@proma/shared'
 import { listChannels } from '../channel-manager'
-import { getAgentSessionMessages, listAgentSessions } from '../agent-session-manager'
-import { normalizeAgentUsage } from './usage-normalizer'
+import { getAgentSessionSDKMessages, listAgentSessions } from '../agent-session-manager'
+import { isSDKResultMessage, normalizeAgentUsage } from './usage-normalizer'
 import { recordUsage } from './usage-recorder'
-
-function isResultMessage(message: SDKMessage): message is SDKResultMessage {
-  return message.type === 'result'
-}
 
 function getNumberField(record: SDKMessage, key: string): number | undefined {
   const value = (record as Record<string, unknown>)[key]
@@ -23,8 +19,8 @@ export function rescanUsageHistory(): UsageRescanResult {
   for (const session of listAgentSessions()) {
     scannedSessions++
     const channel = session.channelId ? channelById.get(session.channelId) : undefined
-    for (const message of getAgentSessionMessages(session.id)) {
-      if (!isResultMessage(message)) continue
+    for (const message of getAgentSessionSDKMessages(session.id)) {
+      if (!isSDKResultMessage(message)) continue
       const timestamp = getNumberField(message, '_createdAt') ?? Date.now()
       const durationMs = getNumberField(message, '_durationMs')
       const record = normalizeAgentUsage({

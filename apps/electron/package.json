@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.14.24",
+  "version": "0.14.27",
   "description": "Proma next gen ai software with general agents - Electron App",
   "main": "dist/main.cjs",
   "author": {
@@ -136,6 +136,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
+    "react-router": "7.18.1",
     "rehype-katex": "^7",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",

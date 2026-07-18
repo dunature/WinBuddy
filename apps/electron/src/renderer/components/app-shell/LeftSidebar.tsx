@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, GitBranch, Download, Loader2, RotateCw } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, GitBranch, Download, Loader2, RotateCw, Store } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -286,6 +286,30 @@ function SkillsSidebarEntry({ count, updateCount, active, onClick }: SkillsSideb
       >
         {formatAutomationCount(count)}
       </span>
+    </button>
+  )
+}
+
+interface MarketplaceSidebarEntryProps {
+  active: boolean
+  onClick: () => void
+}
+
+function MarketplaceSidebarEntry({ active, onClick }: MarketplaceSidebarEntryProps): React.ReactElement {
+  return (
+    <button
+      type="button"
+      aria-label="技能市场"
+      onClick={onClick}
+      className={cn(
+        'group w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] transition-colors duration-100 titlebar-no-drag',
+        active
+          ? 'bg-accent-foreground/[0.10] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+          : 'text-foreground/60 hover:bg-accent-foreground/[0.08] hover:text-foreground',
+      )}
+    >
+      <Store size={16} className={active ? 'text-accent-foreground' : 'text-foreground/45'} />
+      <span className="truncate">技能市场</span>
     </button>
   )
 }
@@ -980,6 +1004,11 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       return
     }
     setActiveView('agent-skills')
+  }, [activeView, setActiveView])
+
+  /** 打开/关闭技能市场 */
+  const handleOpenMarketplace = React.useCallback((): void => {
+    setActiveView(activeView === 'skill-market' ? 'conversations' : 'skill-market')
   }, [activeView, setActiveView])
 
   /** 打开当前工作区的 MCP 管理页 */
@@ -2251,27 +2280,47 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           </Tooltip>
 
           {mode === 'agent' && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="Agent 技能"
-                  onClick={handleOpenSkills}
-                  className={cn(
-                    'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag border',
-                    activeView === 'agent-skills'
-                      ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
-                      : 'border-border/45 bg-foreground/[0.025] text-foreground/45 hover:border-border/70 hover:bg-foreground/[0.045] hover:text-primary',
-                  )}
-                >
-                  <Blocks size={16} />
-                  {(capabilities?.skills.filter((s) => s.hasUpdate).length ?? 0) > 0 && (
-                    <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-blue-500" />
-                  )}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right">Agent 技能</TooltipContent>
-            </Tooltip>
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Agent 技能"
+                    onClick={handleOpenSkills}
+                    className={cn(
+                      'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag border',
+                      activeView === 'agent-skills'
+                        ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
+                        : 'border-border/45 bg-foreground/[0.025] text-foreground/45 hover:border-border/70 hover:bg-foreground/[0.045] hover:text-primary',
+                    )}
+                  >
+                    <Blocks size={16} />
+                    {(capabilities?.skills.filter((s) => s.hasUpdate).length ?? 0) > 0 && (
+                      <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-blue-500" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Agent 技能</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="技能市场"
+                    onClick={handleOpenMarketplace}
+                    className={cn(
+                      'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag border',
+                      activeView === 'skill-market'
+                        ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
+                        : 'border-border/45 bg-foreground/[0.025] text-foreground/45 hover:border-border/70 hover:bg-foreground/[0.045] hover:text-primary',
+                    )}
+                  >
+                    <Store size={16} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">技能市场</TooltipContent>
+              </Tooltip>
+            </>
           )}
         </div>
 
@@ -2405,12 +2454,16 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
       {/* Agent 技能入口：Skills / MCP 能力中心，仅 Agent 模式可见 */}
       {mode === 'agent' && (
-        <div className="px-3 pb-0.5">
+        <div className="space-y-0.5 px-3 pb-0.5">
           <SkillsSidebarEntry
             count={capabilities?.skills.length ?? 0}
             updateCount={capabilities?.skills.filter((s) => s.hasUpdate).length ?? 0}
             active={activeView === 'agent-skills'}
             onClick={handleOpenSkills}
+          />
+          <MarketplaceSidebarEntry
+            active={activeView === 'skill-market'}
+            onClick={handleOpenMarketplace}
           />
         </div>
       )}

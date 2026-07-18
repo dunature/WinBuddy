@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type {
+  SDKMessage,
   SDKResultMessage,
   UsageModelBreakdown,
   UsageRecord,
@@ -63,6 +64,40 @@ function sourceKey(parts: readonly (string | number | undefined)[]): string {
 
 function normalizeStatus(status: UsageStatus): UsageStatus {
   return status
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isOptionalNumber(value: unknown): boolean {
+  return value === undefined || typeof value === 'number'
+}
+
+/** 过滤 SDK catch-all 消息，只允许结构完整的 result 进入用量统计。 */
+export function isSDKResultMessage(message: SDKMessage): message is SDKResultMessage {
+  if (message.type !== 'result' || !isRecord(message)) return false
+  const usage = message.usage
+  if (typeof message.subtype !== 'string' || !isRecord(usage)) return false
+  if (typeof usage.input_tokens !== 'number' || typeof usage.output_tokens !== 'number') return false
+  if (!isOptionalNumber(usage.cache_read_input_tokens) || !isOptionalNumber(usage.cache_creation_input_tokens)) return false
+  if (!isOptionalNumber(message.total_cost_usd)) return false
+
+  if (message.modelUsage !== undefined) {
+    if (!isRecord(message.modelUsage)) return false
+    const validModelUsage = Object.values(message.modelUsage).every((modelUsage) => (
+      isRecord(modelUsage)
+      && isOptionalNumber(modelUsage.inputTokens)
+      && isOptionalNumber(modelUsage.outputTokens)
+      && isOptionalNumber(modelUsage.cacheReadInputTokens)
+      && isOptionalNumber(modelUsage.cacheCreationInputTokens)
+      && isOptionalNumber(modelUsage.costUSD)
+      && isOptionalNumber(modelUsage.contextWindow)
+    ))
+    if (!validModelUsage) return false
+  }
+
+  return true
 }
 
 export function normalizeAgentUsage(input: NormalizeAgentUsageInput): UsageRecord | null {
