@@ -16,6 +16,7 @@ const app = createMarketplaceApp({
   webRoot: config.webRoot,
   storageDir: config.storageDir,
   allowedOrigin: config.allowedOrigin,
+  downloadSigningSecret: config.downloadSigningSecret,
 })
 
 Bun.serve({

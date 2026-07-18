@@ -18,6 +18,7 @@ describe('Marketplace API 配置', () => {
       MARKETPLACE_ADMIN_USERNAME: 'market-admin',
       MARKETPLACE_ADMIN_INITIAL_PASSWORD: 'initial-password-123',
       MARKETPLACE_ALLOWED_ORIGIN: 'https://marketplace.example.com',
+      MARKETPLACE_DOWNLOAD_SIGNING_SECRET: 'download-signing-secret-with-32-bytes',
     })).toEqual({
       databaseUrl: 'postgres://localhost/marketplace',
       host: '0.0.0.0',
@@ -27,6 +28,7 @@ describe('Marketplace API 配置', () => {
       adminUsername: 'market-admin',
       adminInitialPassword: 'initial-password-123',
       allowedOrigin: 'https://marketplace.example.com',
+      downloadSigningSecret: 'download-signing-secret-with-32-bytes',
     })
   })
 
@@ -66,5 +68,12 @@ describe('Marketplace API 配置', () => {
       MARKETPLACE_ADMIN_USERNAME: 'admin',
       MARKETPLACE_ADMIN_INITIAL_PASSWORD: 'initial-password-123',
     })).toThrow('缺少 MARKETPLACE_STORAGE_DIR')
+    expect(() => loadMarketplaceConfig({
+      MARKETPLACE_DATABASE_URL: 'postgres://localhost/marketplace',
+      MARKETPLACE_ADMIN_USERNAME: 'admin',
+      MARKETPLACE_ADMIN_INITIAL_PASSWORD: 'initial-password-123',
+      MARKETPLACE_STORAGE_DIR: '/tmp/marketplace-storage',
+      MARKETPLACE_DOWNLOAD_SIGNING_SECRET: 'too-short',
+    })).toThrow('MARKETPLACE_DOWNLOAD_SIGNING_SECRET 至少需要 32 个字符')
   })
 })

@@ -261,6 +261,7 @@ export async function getPublicInstallManifest(
   database: MarketplaceDatabase,
   identifier: string,
   version: string,
+  downloadUrlFactory?: (identifier: string, version: string) => string,
 ): Promise<MarketplaceInstallManifest | null> {
   const versionRecord = await getPublicVersionRecord(database, identifier, version)
   if (!versionRecord) return null
@@ -276,5 +277,6 @@ export async function getPublicInstallManifest(
     size: versionRecord.size,
     fileCount: versionRecord.fileCount,
     files: buildMarketplaceFileTree(files),
+    ...(downloadUrlFactory ? { downloadUrl: downloadUrlFactory(identifier, version) } : {}),
   }
 }
