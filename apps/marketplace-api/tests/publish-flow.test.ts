@@ -11,6 +11,7 @@ import type {
   MarketplaceApiError,
   MarketplaceApiSuccess,
   MarketplaceInstallManifest,
+  MarketplaceBulkGovernanceResult,
   MarketplaceVersionGovernanceAction,
 } from '@proma/shared'
 import { initializeMarketplaceAdmin } from '../src/admin-auth'
@@ -510,5 +511,101 @@ describe.skipIf(!adminDatabaseUrl)('Marketplace 审核发布黄金路径（真�
     expect(results.map((result) => result.body.data.changed).sort()).toEqual([false, true])
     expect(results.every((result) => result.body.data.version.status === 'approved'
       && result.body.data.skill.currentPublishedVersionId === null)).toBe(true)
+  })
+
+  test('Given 混合状态目标 When 批量下架、归档和删除草稿 Then 独立提交并返回成功跳过失败与逐项审计', async () => {
+    const current = await createCandidate('bulk-current', '1.0.0')
+    await action(current.skillId, current.versionId, 'submit_review')
+    await action(current.skillId, current.versionId, 'approve')
+    await action(current.skillId, current.versionId, 'publish')
+    const candidate = await createVersionCandidate(current.skillId, 'bulk-current', '1.1.0')
+
+    const bulk = async (
+      name: 'unpublish' | 'archive' | 'delete_draft',
+      key: string,
+      items: Array<{ key: string; skillId: string; versionId?: string; revision?: number }>,
+    ): Promise<MarketplaceBulkGovernanceResult> => {
+      const response = await app.request(`/api/v1/admin/bulk-actions/${name}`, {
+        method: 'POST',
+        headers: { ...adminHeaders(), 'idempotency-key': key },
+        body: JSON.stringify({ reason: `批量测试 ${name}`, items }),
+      })
+      expect(response.status).toBe(200)
+      return (await readJson<MarketplaceApiSuccess<MarketplaceBulkGovernanceResult>>(response)).data
+    }
+
+    const mixed = await bulk('unpublish', 'bulk-unpublish-mixed', [
+      { key: 'current', skillId: current.skillId, versionId: current.versionId },
+      { key: 'candidate', skillId: candidate.skillId, versionId: candidate.versionId },
+    ])
+    expect(mixed.succeeded.map((item) => item.key)).toEqual(['current'])
+    expect(mixed.failed).toEqual([
+      expect.objectContaining({ key: 'candidate', outcome: 'failed', code: 'VERSION_ACTION_NOT_ALLOWED' }),
+    ])
+
+    const skipped = await bulk('unpublish', 'bulk-unpublish-skipped', [
+      { key: 'current', skillId: current.skillId, versionId: current.versionId },
+    ])
+    expect(skipped.skipped).toEqual([
+      expect.objectContaining({ key: 'current', outcome: 'skipped', code: 'TARGET_ALREADY_STATE' }),
+    ])
+
+    const archived = await bulk('archive', 'bulk-archive-current', [
+      { key: 'current', skillId: current.skillId, versionId: current.versionId },
+    ])
+    expect(archived.succeeded.map((item) => item.key)).toEqual(['current'])
+
+    const draft = await createCandidate('bulk-delete-draft', '1.0.0')
+    const draftRows = await database.sql<{ revision: number }[]>`
+      SELECT revision FROM skills WHERE id = ${draft.skillId}
+    `
+    const deleted = await bulk('delete_draft', 'bulk-delete-success', [
+      { key: 'draft', skillId: draft.skillId, revision: draftRows[0]!.revision },
+      { key: 'published', skillId: current.skillId, revision: 1 },
+    ])
+    expect(deleted.succeeded.map((item) => item.key)).toEqual(['draft'])
+    expect(deleted.failed).toEqual([
+      expect.objectContaining({ key: 'published', outcome: 'failed', code: 'SKILL_NOT_DELETABLE' }),
+    ])
+    const deletedAgain = await bulk('delete_draft', 'bulk-delete-skipped', [
+      { key: 'draft', skillId: draft.skillId, revision: draftRows[0]!.revision },
+    ])
+    expect(deletedAgain.skipped).toEqual([
+      expect.objectContaining({ key: 'draft', outcome: 'skipped', code: 'TARGET_ALREADY_DELETED' }),
+    ])
+
+    const concurrent = await createCandidate('bulk-concurrent', '1.0.0')
+    await action(concurrent.skillId, concurrent.versionId, 'submit_review')
+    await action(concurrent.skillId, concurrent.versionId, 'approve')
+    await action(concurrent.skillId, concurrent.versionId, 'publish')
+    const concurrentResults = await Promise.all([
+      bulk('unpublish', 'bulk-concurrent-one', [
+        { key: 'concurrent-one', skillId: concurrent.skillId, versionId: concurrent.versionId },
+      ]),
+      bulk('unpublish', 'bulk-concurrent-two', [
+        { key: 'concurrent-two', skillId: concurrent.skillId, versionId: concurrent.versionId },
+      ]),
+    ])
+    expect(concurrentResults.flatMap((result) => [
+      ...result.succeeded.map((item) => item.outcome),
+      ...result.skipped.map((item) => item.outcome),
+    ]).sort()).toEqual(['skipped', 'succeeded'])
+
+    const audits = await database.sql<{
+      action: string
+      request_id: string
+      actor_identifier: string
+      before_state: Record<string, unknown>
+      after_state: Record<string, unknown>
+      reason: string
+    }[]>`
+      SELECT action, request_id, actor_identifier, before_state, after_state, reason
+      FROM audit_entries WHERE action LIKE 'bulk.%'
+    `
+    expect(audits).toHaveLength(9)
+    expect(audits.every((entry) => Boolean(entry.request_id))).toBe(true)
+    expect(audits.every((entry) => entry.actor_identifier === 'admin'
+      && Boolean(entry.before_state.key) && Boolean(entry.after_state.outcome)
+      && entry.reason.startsWith('批量测试'))).toBe(true)
   })
 })
