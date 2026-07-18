@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
+import { serveStatic } from 'hono/bun'
 import { MARKETPLACE_MAX_TEXT_PREVIEW_BYTES } from '@proma/marketplace-domain'
 import type { MarketplaceDatabase } from './database/client'
 import {
@@ -19,6 +20,7 @@ interface MarketplaceAppEnv {
 export interface CreateMarketplaceAppOptions {
   database: MarketplaceDatabase
   requestIdFactory?: () => string
+  webRoot?: string
 }
 
 export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono<MarketplaceAppEnv> {
@@ -31,6 +33,25 @@ export function createMarketplaceApp(options: CreateMarketplaceAppOptions): Hono
     context.header('x-request-id', requestId)
     await next()
   })
+
+  if (options.webRoot) {
+    const webRoot = options.webRoot
+    app.get('/agent/marketplace', (context) => context.redirect('/agent/marketplace/'))
+    app.get('/agent/marketplace/*', serveStatic({
+      root: webRoot,
+      rewriteRequestPath: (path) => path.replace(/^\/agent\/marketplace/, ''),
+      onFound: (path, context) => {
+        if (path.includes('/assets/')) {
+          context.header('cache-control', 'public, max-age=31536000, immutable')
+        }
+      },
+    }))
+    app.get('/agent/marketplace/*', serveStatic({
+      root: webRoot,
+      rewriteRequestPath: () => '/index.html',
+      onFound: (_path, context) => context.header('cache-control', 'no-cache'),
+    }))
+  }
 
   app.get('/api/v1/health', (context) => context.json({
     data: { status: 'ok' },
