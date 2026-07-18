@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { openPromise, type Entry } from 'yauzl'
@@ -54,6 +55,45 @@ async function readEntry(
     chunks.push(buffer)
   }
   return Buffer.concat(chunks)
+}
+
+export interface MarketplaceArchiveFileSnapshot {
+  path: string
+  size: number
+  sha256: string
+}
+
+export async function snapshotMarketplaceArchive(
+  archivePath: string,
+  identifier: string,
+  signal?: AbortSignal,
+): Promise<MarketplaceArchiveFileSnapshot[]> {
+  const files: MarketplaceArchiveFileSnapshot[] = []
+  const prefix = `${identifier}/`
+  const zipFile = await openPromise(archivePath, {
+    autoClose: false,
+    strictFileNames: true,
+    validateEntrySizes: true,
+  })
+  try {
+    for await (const entry of zipFile.eachEntry()) {
+      signal?.throwIfAborted()
+      if (entryKind(entry) !== 'file') continue
+      const normalized = entry.fileName.replaceAll('\\', '/')
+      if (!normalized.startsWith(prefix)) throw new Error('ZIP 根目录与 Skill identifier 不一致')
+      const path = normalized.slice(prefix.length)
+      if (!path) continue
+      const content = await readEntry(entry, zipFile, signal)
+      files.push({
+        path,
+        size: content.byteLength,
+        sha256: createHash('sha256').update(content).digest('hex'),
+      })
+    }
+  } finally {
+    zipFile.close()
+  }
+  return files.sort((left, right) => left.path.localeCompare(right.path))
 }
 
 export async function inspectMarketplaceArchive(

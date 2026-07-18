@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  compareMarketplaceSemVer,
   createMarketplaceCandidateVersionState,
   createMarketplaceDraftSkillState,
   MARKETPLACE_SKILL_STATUSES,
@@ -26,6 +27,13 @@ describe('技能市场草稿领域规则', () => {
     expect(isMarketplaceSemVer('1.0')).toBe(false)
     expect(isMarketplaceSemVer('01.0.0')).toBe(false)
     expect(isMarketplaceSemVer('1.0.0-01')).toBe(false)
+  })
+
+  test('Given 合法 SemVer When 比较更新顺序 Then 遵循 prerelease precedence 并忽略 build metadata', () => {
+    expect(compareMarketplaceSemVer('1.2.0', '1.1.9')).toBe(1)
+    expect(compareMarketplaceSemVer('1.2.0-beta.2', '1.2.0-beta.10')).toBe(-1)
+    expect(compareMarketplaceSemVer('1.2.0', '1.2.0-rc.1')).toBe(1)
+    expect(compareMarketplaceSemVer('1.2.0+build.2', '1.2.0+build.1')).toBe(0)
   })
 
   test('Given 新建 Skill 与候选版本 When 生成初始状态 Then 使用固定状态且不改变线上指针', () => {

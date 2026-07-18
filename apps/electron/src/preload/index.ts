@@ -164,6 +164,7 @@ export interface ElectronAPI {
   getMarketplaceInstall: (installId: string) => Promise<import('@proma/shared').MarketplaceInstallState | undefined>
   getMarketplaceInstallStatus: (installId: string) => Promise<import('@proma/shared').MarketplaceInstallStatus | undefined>
   installMarketplaceSkill: (request: import('@proma/shared').MarketplaceInstallRequest) => Promise<import('@proma/shared').MarketplaceInstallState>
+  previewMarketplaceUpdate: (request: import('@proma/shared').MarketplaceInstallRequest) => Promise<import('@proma/shared').MarketplaceUpdatePreview>
   updateMarketplaceSkill: (request: import('@proma/shared').MarketplaceInstallRequest) => Promise<import('@proma/shared').MarketplaceInstallState>
   confirmMarketplaceInstallConflict: (installId: string) => Promise<import('@proma/shared').MarketplaceInstallState>
   cancelMarketplaceInstall: (installId: string) => Promise<boolean>
@@ -1155,6 +1156,8 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.GET_INSTALL_STATUS, installId),
   installMarketplaceSkill: (request) =>
     ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.INSTALL, request),
+  previewMarketplaceUpdate: (request) =>
+    ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.PREVIEW_UPDATE, request),
   updateMarketplaceSkill: (request) =>
     ipcRenderer.invoke(MARKETPLACE_IPC_CHANNELS.UPDATE, request),
   confirmMarketplaceInstallConflict: (installId) =>

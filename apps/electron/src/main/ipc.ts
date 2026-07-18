@@ -137,6 +137,7 @@ import type {
   MarketplaceInstallRequest,
   MarketplaceInstallState,
   MarketplaceInstallStatus,
+  MarketplaceUpdatePreview,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
@@ -940,6 +941,12 @@ export function registerIpcHandlers(): void {
     MARKETPLACE_IPC_CHANNELS.INSTALL,
     async (_, request: MarketplaceInstallRequest): Promise<MarketplaceInstallState> =>
       marketplaceInstaller.install(request)
+  )
+
+  ipcMain.handle(
+    MARKETPLACE_IPC_CHANNELS.PREVIEW_UPDATE,
+    async (_, request: MarketplaceInstallRequest): Promise<MarketplaceUpdatePreview> =>
+      marketplaceInstaller.previewUpdate(request)
   )
 
   ipcMain.handle(

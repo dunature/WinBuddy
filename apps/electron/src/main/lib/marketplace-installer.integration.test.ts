@@ -250,6 +250,71 @@ describe('Marketplace 安装 HTTP 集成', () => {
     expect(existsSync(join(workspaceRoot, 'skills', '.deep-research.install-http.zip'))).toBe(false)
   })
 
+  test('Given 临时 HOME 已安装旧版本 When 通过真实 HTTP 更新 Then 获取可信 manifest 并原子替换', async () => {
+    const home = createTemporaryHome()
+    const archive = createSkillArchive()
+    const requestedPaths = startTestApi(archive)
+    const workspaceRoot = join(home, '.proma', 'agent-workspaces', 'research')
+    const installedDirectory = join(workspaceRoot, 'skills', 'deep-research')
+    mkdirSync(installedDirectory, { recursive: true })
+    writeFileSync(join(installedDirectory, 'old.txt'), '旧版本', 'utf8')
+    writeFileSync(join(installedDirectory, '.source.json'), JSON.stringify({
+      kind: 'marketplace',
+      marketplaceSkillId: 'skill-public',
+      identifier: 'deep-research',
+      installedVersion: '1.0.0',
+      contentHash: 'a'.repeat(64),
+      installedAt: '2026-07-18T00:00:00.000Z',
+    }), 'utf8')
+    const { installer } = createHttpInstaller(home, 'update-http')
+
+    const completed = await installer.waitForInstall(installer.update({
+      workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0',
+    }).installId)
+
+    expect(completed.phase).toBe('completed')
+    expect(requestedPaths).toEqual([
+      '/api/v1/marketplace/skills/by-id/skill-public/versions/1.2.0/manifest',
+      '/api/v1/marketplace/downloads/deep-research/1.2.0',
+    ])
+    expect(existsSync(join(installedDirectory, 'old.txt'))).toBe(false)
+    expect(readFileSync(join(installedDirectory, 'SKILL.md'), 'utf8')).toContain('version: 1.2.0')
+    expect(existsSync(join(workspaceRoot, 'skills', '.deep-research.update-http.backup'))).toBe(false)
+  })
+
+  test('Given 临时 HOME 已安装旧版本 When 通过真实 HTTP 预览 Then 返回内容 diff 并清理预览包', async () => {
+    const home = createTemporaryHome()
+    const archive = createSkillArchive()
+    const requestedPaths = startTestApi(archive)
+    const workspaceRoot = join(home, '.proma', 'agent-workspaces', 'research')
+    const installedDirectory = join(workspaceRoot, 'skills', 'deep-research')
+    mkdirSync(installedDirectory, { recursive: true })
+    writeFileSync(join(installedDirectory, 'SKILL.md'), '旧版 Skill', 'utf8')
+    writeFileSync(join(installedDirectory, '.source.json'), JSON.stringify({
+      kind: 'marketplace',
+      marketplaceSkillId: 'skill-public',
+      identifier: 'deep-research',
+      installedVersion: '1.0.0',
+      contentHash: 'a'.repeat(64),
+      installedAt: '2026-07-18T00:00:00.000Z',
+    }), 'utf8')
+    const { installer } = createHttpInstaller(home, 'preview-http')
+
+    const preview = await installer.previewUpdate({
+      workspaceSlug: 'research', marketplaceSkillId: 'skill-public', version: '1.2.0',
+    })
+
+    expect(requestedPaths).toEqual([
+      '/api/v1/marketplace/skills/by-id/skill-public/versions/1.2.0/manifest',
+      '/api/v1/marketplace/downloads/deep-research/1.2.0',
+    ])
+    expect(preview.changes).toEqual([
+      expect.objectContaining({ path: 'SKILL.md', kind: 'modified' }),
+      expect.objectContaining({ path: 'references/guide.md', kind: 'added' }),
+    ])
+    expect(existsSync(join(workspaceRoot, 'skills', '.deep-research.preview-http.preview.zip'))).toBe(false)
+  })
+
   test('Given 测试 API 返回错误 hash When 安装 Then 失败且临时 HOME 中没有目标或临时文件', async () => {
     const home = createTemporaryHome()
     const archive = createSkillArchive()
