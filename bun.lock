@@ -175,7 +175,7 @@
     },
     "apps/marketplace-web": {
       "name": "@proma/marketplace-web",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "dependencies": {
         "@proma/shared": "workspace:*",
         "dompurify": "3.4.5",

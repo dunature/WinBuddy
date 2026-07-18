@@ -3,6 +3,7 @@ import type {
   MarketplaceAdminSession,
   MarketplaceAdminSkillDetail,
   MarketplaceAdminSkillSummary,
+  MarketplaceAdminUpload,
   MarketplaceAdminVersion,
   MarketplaceApiPage,
   MarketplaceApiSuccess,
@@ -125,4 +126,47 @@ export async function createAdminVersion(
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
     body: JSON.stringify(input),
   })
+}
+
+export async function listAdminUploads(
+  skillId: string,
+  versionId: string,
+  signal?: AbortSignal,
+): Promise<MarketplaceAdminUpload[]> {
+  return adminRequest(
+    `/admin/skills/${encodeURIComponent(skillId)}/versions/${encodeURIComponent(versionId)}/uploads`,
+    { signal },
+  )
+}
+
+export async function getAdminUpload(
+  skillId: string,
+  versionId: string,
+  uploadId: string,
+  signal?: AbortSignal,
+): Promise<MarketplaceAdminUpload> {
+  return adminRequest(
+    `/admin/skills/${encodeURIComponent(skillId)}/versions/${encodeURIComponent(versionId)}/uploads/${encodeURIComponent(uploadId)}`,
+    { signal },
+  )
+}
+
+export async function uploadAdminVersion(
+  skillId: string,
+  versionId: string,
+  file: File,
+  csrfToken: string,
+): Promise<MarketplaceAdminUpload> {
+  return adminRequest(
+    `/admin/skills/${encodeURIComponent(skillId)}/versions/${encodeURIComponent(versionId)}/uploads`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': file.type || 'application/zip',
+        'x-file-name': encodeURIComponent(file.name),
+        'x-csrf-token': csrfToken,
+      },
+      body: file,
+    },
+  )
 }

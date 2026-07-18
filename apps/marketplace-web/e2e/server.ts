@@ -1,4 +1,7 @@
 import type { Sql } from 'postgres'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createMarketplaceApp } from '../../marketplace-api/src/app'
 import { initializeMarketplaceAdmin } from '../../marketplace-api/src/admin-auth'
 import { createMarketplaceDatabase } from '../../marketplace-api/src/database/client'
@@ -82,6 +85,7 @@ await cleanupTrackedE2eDatabase(adminDatabaseUrl)
 const testDatabase = await createMarketplaceTestDatabase(adminDatabaseUrl)
 await writeE2eDatabaseState(testDatabase.databaseUrl)
 const database = createMarketplaceDatabase(testDatabase.databaseUrl)
+const storageDir = await mkdtemp(join(tmpdir(), 'proma-marketplace-web-e2e-'))
 await runMarketplaceMigrations(database.sql)
 await initializeMarketplaceAdmin(database, {
   username: 'admin',
@@ -97,6 +101,7 @@ const app = createMarketplaceApp({
   webRoot,
   allowedOrigin: 'http://localhost:4320',
   sessionDurationMs,
+  storageDir,
 })
 app.post('/__e2e__/expire-admin-sessions', async (context) => {
   await database.sql`UPDATE admin_sessions SET invalidated_at = now() WHERE invalidated_at IS NULL`
@@ -111,6 +116,7 @@ async function close(): Promise<void> {
   closing = true
   server.stop(true)
   await database.sql.end()
+  await rm(storageDir, { recursive: true, force: true })
   await cleanupTrackedE2eDatabase(adminDatabaseUrl)
   process.exit(0)
 }

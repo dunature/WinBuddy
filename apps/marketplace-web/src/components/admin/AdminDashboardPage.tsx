@@ -2,7 +2,12 @@ import * as React from 'react'
 import { useAtom } from 'jotai'
 import { useNavigate } from 'react-router'
 import { FilePlus2, LoaderCircle, LogOut, RefreshCw, ShieldCheck } from 'lucide-react'
-import type { MarketplaceAdminSkillDetail, MarketplaceAdminSkillSummary, MarketplaceAdminVersion } from '@proma/shared'
+import type {
+  MarketplaceAdminSkillDetail,
+  MarketplaceAdminSkillSummary,
+  MarketplaceAdminUpload,
+  MarketplaceAdminVersion,
+} from '@proma/shared'
 import { getAdminSkill, listAdminSkills, logoutAdmin } from '../../admin-api'
 import { adminDraftWorkspaceAtom } from '../../admin-draft-state'
 import { adminAuthAtom } from '../../admin-state'
@@ -89,6 +94,20 @@ export function AdminDashboardPage(): React.ReactElement {
       ? { ...current, selectedSkill: { ...current.selectedSkill, versions: [version, ...current.selectedSkill.versions] } }
       : current)
   }
+
+  const versionChanged = React.useCallback((upload: MarketplaceAdminUpload): void => {
+    setWorkspace((current) => current.selectedSkill
+      ? {
+          ...current,
+          selectedSkill: {
+            ...current.selectedSkill,
+            versions: current.selectedSkill.versions.map((item) => item.id === upload.versionId
+              ? { ...item, status: upload.versionStatus, revision: upload.versionRevision }
+              : item),
+          },
+        }
+      : current)
+  }, [setWorkspace])
 
   const logout = async (): Promise<void> => {
     if (!auth.session) return
@@ -189,7 +208,12 @@ export function AdminDashboardPage(): React.ReactElement {
                     onDeleted={deleted}
                   />
                   {!workspace.creating && workspace.selectedSkill && (
-                    <AdminVersionPanel skill={workspace.selectedSkill} csrfToken={csrfToken} onCreated={versionCreated} />
+                    <AdminVersionPanel
+                      skill={workspace.selectedSkill}
+                      csrfToken={csrfToken}
+                      onCreated={versionCreated}
+                      onVersionChanged={versionChanged}
+                    />
                   )}
                 </>
               ) : (
