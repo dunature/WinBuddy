@@ -95,7 +95,7 @@ export function AdminDashboardPage(): React.ReactElement {
       : current)
   }
 
-  const versionChanged = React.useCallback((upload: MarketplaceAdminUpload): void => {
+  const versionChanged = React.useCallback((skillId: string, upload: MarketplaceAdminUpload): void => {
     setWorkspace((current) => current.selectedSkill
       ? {
           ...current,
@@ -107,6 +107,19 @@ export function AdminDashboardPage(): React.ReactElement {
           },
         }
       : current)
+    void getAdminSkill(skillId)
+      .then((skill) => setWorkspace((current) => current.selectedSkill?.id === skillId
+        ? {
+            ...current,
+            items: upsertSkill(current.items, skill),
+            selectedSkill: skill,
+            error: null,
+          }
+        : current))
+      .catch((requestError: unknown) => setWorkspace((current) => ({
+        ...current,
+        error: requestError instanceof Error ? requestError.message : '版本治理状态刷新失败',
+      })))
   }, [setWorkspace])
 
   const logout = async (): Promise<void> => {
