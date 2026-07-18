@@ -31,12 +31,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
-async function requestEnvelope(path: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+export async function requestMarketplaceEnvelope(
+  path: string,
+  init: RequestInit = {},
+): Promise<Record<string, unknown>> {
   let response: Response
   try {
     response = await fetch(`${apiBaseUrl}${path}`, {
-      headers: { accept: 'application/json' },
-      signal,
+      ...init,
+      credentials: 'same-origin',
+      headers: { accept: 'application/json', ...Object.fromEntries(new Headers(init.headers)) },
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
@@ -64,7 +68,7 @@ async function requestEnvelope(path: string, signal?: AbortSignal): Promise<Reco
 }
 
 async function requestData<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const envelope = await requestEnvelope(path, signal) as unknown as MarketplaceApiSuccess<T>
+  const envelope = await requestMarketplaceEnvelope(path, { signal }) as unknown as MarketplaceApiSuccess<T>
   return envelope.data
 }
 
@@ -84,7 +88,7 @@ export async function listMarketplaceSkills(
   if (query.query) search.set('q', query.query)
   if (query.category) search.set('category', query.category)
   if (query.featured) search.set('featured', '1')
-  const envelope = await requestEnvelope(`/marketplace/skills?${search}`, signal) as unknown as MarketplaceApiPage<MarketplaceSkillSummary>
+  const envelope = await requestMarketplaceEnvelope(`/marketplace/skills?${search}`, { signal }) as unknown as MarketplaceApiPage<MarketplaceSkillSummary>
   return { items: envelope.data, page: envelope.page }
 }
 

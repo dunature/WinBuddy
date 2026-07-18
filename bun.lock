@@ -159,7 +159,7 @@
     },
     "apps/marketplace-api": {
       "name": "@proma/marketplace-api",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "dependencies": {
         "@proma/marketplace-domain": "workspace:*",
         "@proma/shared": "workspace:*",
@@ -173,7 +173,7 @@
     },
     "apps/marketplace-web": {
       "name": "@proma/marketplace-web",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@proma/shared": "workspace:*",
         "dompurify": "3.4.5",
@@ -235,7 +235,7 @@
     },
     "packages/shared": {
       "name": "@proma/shared",
-      "version": "0.1.44",
+      "version": "0.1.45",
       "devDependencies": {
         "typescript": "^5.0.0",
       },

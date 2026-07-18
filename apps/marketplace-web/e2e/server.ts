@@ -1,5 +1,6 @@
 import type { Sql } from 'postgres'
 import { createMarketplaceApp } from '../../marketplace-api/src/app'
+import { initializeMarketplaceAdmin } from '../../marketplace-api/src/admin-auth'
 import { createMarketplaceDatabase } from '../../marketplace-api/src/database/client'
 import { runMarketplaceMigrations } from '../../marketplace-api/src/database/migrate'
 import { createMarketplaceTestDatabase } from '../../marketplace-api/tests/test-database'
@@ -82,10 +83,21 @@ const testDatabase = await createMarketplaceTestDatabase(adminDatabaseUrl)
 await writeE2eDatabaseState(testDatabase.databaseUrl)
 const database = createMarketplaceDatabase(testDatabase.databaseUrl)
 await runMarketplaceMigrations(database.sql)
+await initializeMarketplaceAdmin(database, {
+  username: 'admin',
+  initialPassword: 'initial-password-123',
+  requestId: 'marketplace-web-e2e-bootstrap',
+})
 await seedCatalog(database.sql)
 
 const webRoot = new URL('../dist', import.meta.url).pathname
-const app = createMarketplaceApp({ database, webRoot })
+const sessionDurationMs = Number(Bun.env.MARKETPLACE_E2E_SESSION_DURATION_MS ?? '5000')
+const app = createMarketplaceApp({
+  database,
+  webRoot,
+  allowedOrigin: 'http://localhost:4320',
+  sessionDurationMs,
+})
 const server = Bun.serve({ hostname: '127.0.0.1', port: 4320, fetch: app.fetch })
 console.log(`[技能市场 Web E2E] 已启动: ${server.url}`)
 
